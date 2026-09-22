@@ -17,10 +17,7 @@ This repository is the static landing site and Telegram Mini App frontend for Ju
 - Keep production API and Telegram bot identifiers centralized in the existing configuration path.
 - Preserve safe root redirects, Telegram WebApp behavior, responsive layout, accessible names, and keyboard use.
 - Never add credentials or private user data to this public repository.
-- Preserve unrelated work in the dirty tree and make focused edits.
-- Owner standing permission, 2026-09-18: push to `origin main` without asking. Finished,
-  verified work gets committed and pushed as part of the task.
-- Know what a push means here: GitHub Pages serves this repository, so pushing to `main`
+- Push permission and working rules: `../AGENTS.md`. Know what a push means here: GitHub Pages serves this repository, so pushing to `main`
   publishes to mindcoachbot.ru and to every open Mini App. `npm test` green is the
   precondition. Say in the reply that the push was a release, so the owner knows the
   change is already live.

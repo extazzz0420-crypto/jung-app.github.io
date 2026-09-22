@@ -10,7 +10,7 @@ This repository is the static landing site and Telegram Mini App frontend for Ju
 - `landing.html`, `landing.js`, and landing styles own the public landing page.
 - `root-redirect.js` owns root routing.
 - `tests/` owns browserless smoke coverage.
-- Product context lives in `/Users/ruslanfomin/iishenka/Projects/jung-bot/`.
+- Product context lives in `/Users/ruslanfomin/HarnessWorkspaces/mindcoach/notes/jung-bot/`; workspace rules in `../AGENTS.md`.
 
 ## Rules
 

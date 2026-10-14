@@ -7,6 +7,27 @@
       timer = setTimeout(() => reject(new Error('Audio setup timeout')), milliseconds);
     })]).finally(() => clearTimeout(timer));
   }
+  function decodePcm(context, base64, rate) {
+    const raw = atob(base64);
+    if (raw.length % 2) throw new Error('unaligned PCM');
+    const length = raw.length / 2;
+    const buffer = context.createBuffer(1, length, rate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      const sample = raw.charCodeAt(i * 2) | raw.charCodeAt(i * 2 + 1) << 8;
+      channel[i] = (sample >= 32768 ? sample - 65536 : sample) / 32768;
+    }
+    return buffer;
+  }
+  // Voices are leveled by a per-voice gain; this limiter catches the remaining peaks.
+  function createLimiter(context, target) {
+    if (!context.createDynamicsCompressor) return target;
+    const limiter = context.createDynamicsCompressor();
+    limiter.threshold.value = -3; limiter.knee.value = 3; limiter.ratio.value = 20;
+    limiter.attack.value = .003; limiter.release.value = .25;
+    limiter.connect(target);
+    return limiter;
+  }
   class VoiceSession {
     constructor({ base, initData, status, socket = url => new WebSocket(url) }) {
       Object.assign(this, { base, initData, status, socket });
@@ -42,6 +63,7 @@
           this.analyser.connect(this.context.destination);
           this.outputSamples = new Float32Array(256);
         }
+        this.limiter = createLimiter(this.context, this.analyser || this.context.destination);
         this.capture = new AudioWorkletNode(this.context, 'jung-capture');
         this.input = this.context.createMediaStreamSource(stream);
         this.input.connect(this.capture);
@@ -174,24 +196,17 @@
         if (this.turn !== event.turn) return;
         this.turn = event.turn;
         this.phrases ||= new Map();
-        this.phrases.set(event.phrase, { rate: event.sample_rate, playing: 0, ended: false, samples: 0 });
+        this.phrases.set(event.phrase, { rate: event.sample_rate, gain: event.gain || 1, playing: 0, ended: false, samples: 0 });
       }
       if (event.turn !== this.turn) return;
       const phrase = this.phrases?.get(event.phrase);
       if (event.type === 'audio' && phrase) {
-        const raw = atob(event.pcm);
-        if (raw.length % 2) throw new Error('unaligned PCM');
-        const length = raw.length / 2;
         if (this.nextTime - this.context.currentTime > 60) throw new Error('playback limit');
-        const buffer = this.context.createBuffer(1, length, phrase.rate);
-        const channel = buffer.getChannelData(0);
-        for (let i = 0; i < length; i++) {
-          const sample = raw.charCodeAt(i * 2) | raw.charCodeAt(i * 2 + 1) << 8;
-          channel[i] = (sample >= 32768 ? sample - 65536 : sample) / 32768;
-        }
+        const buffer = decodePcm(this.context, event.pcm, phrase.rate);
+        const length = buffer.length ?? Math.round(buffer.duration * phrase.rate);
         const source = this.context.createBufferSource();
         source.buffer = buffer;
-        source.connect(this.analyser || this.context.destination);
+        source.connect(this.phraseOutput(phrase));
         phrase.playing++;
         phrase.samples += length;
         this.sources.add(source);
@@ -209,6 +224,16 @@
         phrase.ended = true;
         this.acknowledge(event.turn, event.phrase, phrase);
       }
+    }
+    phraseOutput(phrase) {
+      const out = this.limiter || this.analyser || this.context.destination;
+      if (!this.context.createGain || phrase.gain === 1) return out;
+      if (!phrase.node) {
+        phrase.node = this.context.createGain();
+        phrase.node.gain.value = phrase.gain;
+        phrase.node.connect(out);
+      }
+      return phrase.node;
     }
     acknowledge(turn, index, phrase) {
       if (turn === this.turn && phrase.ended && !phrase.playing && phrase.samples && !phrase.acked) {
@@ -231,5 +256,20 @@
       this.context?.close().catch(() => {});
     }
   }
+  // One-shot preview of a voice sample; returns a handle that stops playback.
+  VoiceSession.playPreview = async ({ pcm, sample_rate: rate, gain = 1 }) => {
+    const context = new AudioContext();
+    await bounded(context.resume(), 5000);
+    const source = context.createBufferSource();
+    source.buffer = decodePcm(context, pcm, rate);
+    const level = context.createGain();
+    level.gain.value = gain;
+    source.connect(level);
+    level.connect(createLimiter(context, context.destination));
+    const stop = () => { try { source.stop(); } catch { /* already ended */ } context.close().catch(() => {}); };
+    source.onended = stop;
+    source.start();
+    return { stop };
+  };
   window.JungVoiceSession = VoiceSession;
 })();

@@ -2779,6 +2779,10 @@ function openVoiceScreen(options = {}) {
   };
   let prefs = options.preferences || {voice: 'sarah', style: 'warm'};
   const voice = addSelect('voice', 'Голос', options.voices || [{id:'sarah',label:'Sarah · женский'}], prefs.voice);
+  const listen = el('button', 'voice-small voice-listen', 'Послушать');
+  listen.type = 'button';
+  listen.setAttribute('aria-label', 'Послушать выбранный голос');
+  voice.parentElement.after(listen);
   const style = addSelect('style', 'Стиль общения', options.styles || [{id:'warm',label:'Тёплый'}], prefs.style);
   const note = el('p', 'voice-hint', 'Стиль общий с чатом. Настройки применяются к следующей реплике.');
   const save = el('button', 'memory-chat', 'Сохранить настройки');
@@ -2798,7 +2802,8 @@ function openVoiceScreen(options = {}) {
   controls.append(mute, interrupt, finish);
   const privacy = el('p', 'voice-privacy', 'Аудиозапись не сохраняется. Память работает по твоим настройкам. Это поддержка ИИ, не медицинская помощь.');
   footer.append(start, controls, privacy);
-  let session, frame, lastFrame = 0, level = 0;
+  let session, frame, lastFrame = 0, level = 0, preview = null;
+  const stopPreview = () => { preview?.stop(); preview = null; };
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const sync = () => {
     const active = session && !session.closed;
@@ -2824,7 +2829,7 @@ function openVoiceScreen(options = {}) {
     frame = requestAnimationFrame(animate);
   };
   const stop = () => {
-    session.stop(); cancelAnimationFrame(frame);
+    stopPreview(); session.stop(); cancelAnimationFrame(frame);
     dialog.close(); dialog.remove();
     document.removeEventListener('visibilitychange', hidden);
   };
@@ -2836,9 +2841,25 @@ function openVoiceScreen(options = {}) {
       sync();
     } else frame = requestAnimationFrame(animate);
   };
+  const openSettings = () => {
+    panel.hidden = false; stage.hidden = true; saved.textContent = '';
+    settings.textContent = '← Назад';
+    settings.setAttribute('aria-label', 'Вернуться к разговору');
+    settings.setAttribute('aria-expanded', 'true');
+    voice.focus();
+  };
+  const closeSettings = message => {
+    stopPreview();
+    panel.hidden = true; stage.hidden = false;
+    settings.textContent = 'Настройки';
+    settings.removeAttribute('aria-label');
+    settings.setAttribute('aria-expanded', 'false');
+    if (message) status.textContent = message;
+    (start.hidden ? settings : start).focus();
+  };
   start.addEventListener('click', () => {
-    panel.hidden = true; settings.setAttribute('aria-expanded', 'false');
-    stage.hidden = false; session.retry = 0; session.start(); sync();
+    closeSettings();
+    session.retry = 0; session.start(); sync();
   });
   mute.addEventListener('click', () => {
     session.setMuted(!session.muted);
@@ -2847,10 +2868,22 @@ function openVoiceScreen(options = {}) {
   });
   interrupt.addEventListener('click', () => { session.interrupt(); status.textContent = 'Слушаю тебя…'; sync(); });
   finish.addEventListener('click', stop);
-  settings.addEventListener('click', () => {
-    panel.hidden = !panel.hidden; stage.hidden = !panel.hidden;
-    settings.setAttribute('aria-expanded', String(!panel.hidden));
-    if (!panel.hidden) voice.focus();
+  settings.addEventListener('click', () => { if (panel.hidden) openSettings(); else closeSettings(); });
+  voice.addEventListener('change', stopPreview);
+  listen.addEventListener('click', async () => {
+    stopPreview(); listen.disabled = true; saved.textContent = 'Включаю пример голоса…';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+    try {
+      const response = await fetch(freshApiUrl('/api/voice/preview'), {
+        method: 'POST', headers: apiHeaders(tg.initData, true), signal: controller.signal,
+        body: JSON.stringify({voice: voice.value}),
+      });
+      if (!response.ok) throw new Error('Preview unavailable');
+      preview = await window.JungVoiceSession.playPreview(await response.json());
+      saved.textContent = '';
+    } catch { saved.textContent = 'Не удалось включить пример. Попробуй ещё раз.'; }
+    finally { clearTimeout(timer); listen.disabled = false; }
   });
   form.addEventListener('submit', async event => {
     event.preventDefault(); save.disabled = true; saved.textContent = 'Сохраняю…';
@@ -2863,7 +2896,7 @@ function openVoiceScreen(options = {}) {
       });
       if (!response.ok) throw new Error('Settings unavailable');
       prefs = (await response.json()).preferences; options.preferences = prefs;
-      saved.textContent = session.closed ? 'Сохранено. Можно начать разговор.' : 'Сохранено. Применится к следующей реплике.';
+      closeSettings(session.closed ? 'Сохранено. Можно начать разговор.' : 'Сохранено. Применится к следующей реплике.');
     } catch { saved.textContent = 'Не удалось сохранить. Попробуй ещё раз.'; }
     finally { clearTimeout(timer); save.disabled = false; }
   });

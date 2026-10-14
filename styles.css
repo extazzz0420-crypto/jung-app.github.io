@@ -3773,6 +3773,7 @@ body {
 .voice-settings h3 { font-size: 26px; margin: 0 0 24px; }
 .voice-field { display: block; margin-bottom: 20px; font-size: 14px; }
 .voice-field select { display: block; width: 100%; min-height: 50px; margin-top: 8px; padding: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 10px; font: inherit; font-size: 16px; }
+.voice-listen { display: block; margin: -12px 0 16px; padding: 8px 0; }
 .voice-settings .memory-chat { width: 100%; min-height: 50px; margin-top: 24px; }
 .voice-settings-status { min-height: 3em; font-size: 14px; }
 @media (max-height: 580px) { .voice-stage { min-height: 180px; padding: 10px 0; } .voice-orb { width: 110px; margin: 12px auto 20px; } .voice-privacy { margin-top: 12px; } }

@@ -283,6 +283,12 @@ createServer(async (req, res) => {
       if (url.pathname.includes("/unauthorized/")) { res.writeHead(401); res.end('{}'); return; }
       if (url.pathname.includes("/empty/")) { res.end('{"profile":null}'); return; }
       if (req.method === "POST") {
+        if (url.pathname.endsWith("/voice/preview")) {
+          res.end(JSON.stringify({sample_rate: 24000, gain: 1.2, pcm: Buffer.alloc(4800).toString("base64")})); return;
+        }
+        if (url.pathname.endsWith("/voice/settings")) {
+          res.end(JSON.stringify({preferences: {voice: "alice", style: "warm"}})); return;
+        }
         if (url.pathname.endsWith("/invoice")) {
           res.end(JSON.stringify({url: "https://t.me/$synthetic-invoice"})); return;
         }

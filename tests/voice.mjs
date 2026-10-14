@@ -110,3 +110,39 @@ assert.equal(muteEvents.length,0); assert.equal(track.enabled,false);
 muted.setMuted(false);
 assert.equal(track.enabled,true); assert.equal(muted.preRoll.length,0);
 console.log('Mute privacy and pre-roll reset: passed');
+
+// Each voice plays at its measured level through a peak limiter.
+const leveled = new context.window.JungVoiceSession({base:'https://synthetic.test',initData:'signed',status(){}});
+leveled.closed = false; leveled.ready = true; leveled.awaiting = true; leveled.turn = 1;
+leveled.ws = {readyState:1,send(){}};
+const gains = []; const links = [];
+leveled.context = {currentTime:0, destination:{name:'out'},
+  createGain(){ const node={gain:{value:1},connect(target){links.push(['gain',target]);return target;}}; gains.push(node); return node; },
+  createBuffer:(_c,n,rate)=>({duration:n/rate,getChannelData:()=>new Float32Array(n)}),
+  createBufferSource:()=>({connect(target){links.push(['source',target]);},start(){},stop(){}})};
+leveled.limiter = {name:'limiter'};
+leveled.message({type:'phrase',turn:1,phrase:0,sample_rate:24000,gain:1.25});
+leveled.message({type:'audio',turn:1,phrase:0,pcm:'AAAAAA=='});
+leveled.message({type:'audio',turn:1,phrase:0,pcm:'AAAAAA=='});
+assert.equal(gains.length,1,'one gain node per phrase');
+assert.equal(gains[0].gain.value,1.25);
+assert.ok(links.some(([from,to])=>from==='gain'&&to===leveled.limiter),'gain feeds the limiter');
+assert.equal(links.filter(([from,to])=>from==='source'&&to===gains[0]).length,2);
+console.log('Per-voice loudness gain and limiter: passed');
+
+// Preview decodes the sample, applies the voice gain and can be stopped.
+const previewNodes = [];
+class PreviewContext {
+  constructor(){ this.destination={}; this.currentTime=0; }
+  async resume(){} async close(){ this.closed=true; }
+  createGain(){ const n={gain:{value:1},connect:t=>t}; previewNodes.push(n); return n; }
+  createDynamicsCompressor(){ return {threshold:{value:0},knee:{value:0},ratio:{value:0},attack:{value:0},release:{value:0},connect:t=>t}; }
+  createBuffer(_c,n,rate){ return {duration:n/rate,getChannelData:()=>new Float32Array(n)}; }
+  createBufferSource(){ const s={connect:t=>t,start(){s.started=true;},stop(){s.stopped=true;}}; this.source=s; return s; }
+}
+const previewEnv={...context,window:{},AudioContext:PreviewContext};
+vm.runInNewContext(source,previewEnv);
+const playing = await previewEnv.window.JungVoiceSession.playPreview({pcm:'AAAAAA==',sample_rate:24000,gain:1.4});
+assert.equal(previewNodes[0].gain.value,1.4);
+playing.stop();
+console.log('Voice preview playback with gain: passed');

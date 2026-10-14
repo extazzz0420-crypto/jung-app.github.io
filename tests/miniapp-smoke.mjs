@@ -309,3 +309,12 @@ assert.ok(voiceEntry, 'voice entry must stay findable');
 assert.match(voiceEntry, /root\.querySelector\('\.talk'\)/);
 assert.match(voiceEntry, /talk\.insertBefore\(button, chat\)/);
 console.log('Voice entry placement contract passed');
+
+// Voice settings: a clear way back, automatic return after saving, voice preview.
+const voiceScreen = app.match(/function openVoiceScreen\(options = \{\}\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(voiceScreen, 'voice screen must stay findable');
+assert.match(voiceScreen, /'← Назад'/, 'open settings show a back button');
+assert.match(voiceScreen, /closeSettings\(/, 'saving returns to the conversation');
+assert.match(voiceScreen, /\/api\/voice\/preview/, 'voices can be previewed');
+assert.match(voiceScreen, /'Послушать'/);
+console.log('Voice settings back, return-after-save and preview: passed');

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-// While the guide answers, only a spoken «стоп» confirmed by the server stops it.
-// Owner phone test 2026-10-14: any sound cut the reply.
+// While the guide answers, only the «Остановить» button stops it. Owner 2026-10-15: the
+// spoken «стоп» is gone with everything that lowered the volume for it.
 const source = await readFile(new URL('../voice.js', import.meta.url), 'utf8');
 let time = 0;
 let outputRms = 0;
@@ -25,7 +25,6 @@ function session() {
     createBufferSource: () => { const s = { connect() {}, start() {}, stop() {} }; sources.push(s); return s; } };
   voice.analyser = { getFloatTimeDomainData: out => out.fill(outputRms) };
   voice.outputSamples = new Float32Array(256);
-  voice.master = { gain: { value: 1 } };
   voice.message({ type: 'ready' });
   const frame = rms => { time += 20; voice.captureFrame({ pcm: new ArrayBuffer(960), rms }); };
   // One finished user turn, the guide starts speaking.
@@ -48,7 +47,10 @@ assert.equal(sent(s, 'check'), 0, 'no stop checks any more');
 assert.equal(sent(s, 'end'), 0, 'talking over the reply is not a turn');
 assert.equal(sent(s, 'interrupt'), 0, 'and does not cut it');
 assert.equal(s.voice.sources.size, 1, 'playback continues');
-assert.equal(s.voice.master.gain.value, 1, 'and is not made quieter');
+// Nothing in the client can make the guide quieter: no master level, no ducking.
+assert.equal(s.voice.master, undefined, 'no volume stage between the voice and the speaker');
+assert.equal(typeof s.voice.duck, 'undefined', 'no ducking');
+assert.ok(!/check_end|check_ignored|heard_as_turn|duck\(/.test(source), 'no stop-check protocol left');
 assert.equal(s.binary.length, 0, 'nothing said over the reply is sent');
 
 // The button: playback stops here at once and the server is told.
@@ -58,11 +60,6 @@ assert.equal(sent(s, 'interrupt'), 1);
 for (let i = 0; i < 3; i++) s.frame(.1);
 time += 750; s.frame(0);
 assert.equal(sent(s, 'end'), 1, 'after the stop the person simply talks');
-
-// A server `stopped` (older protocol) still stops local playback.
-s = session();
-s.voice.message({ type: 'stopped', turn: 1 });
-assert.equal(s.voice.sources.size, 0);
 
 // Owner 2026-10-14: answering right after the guide finished was lost. Once every phrase
 // was sent and played, speech is the next turn.
@@ -90,10 +87,5 @@ time += 200;
 for (let i = 0; i < 10; i++) s.frame(.1);
 time += 750; s.frame(0);
 assert.equal(sent(s, 'end'), 0);
-
-// The server took words for the next turn: the client follows its numbering.
-s.voice.message({ type: 'heard_as_turn' });
-assert.equal(s.voice.turn, 2);
-assert.equal(s.voice.awaiting, true);
 
 console.log('Voice reply: button stops it, talking over it is ignored, answers after it count: passed');

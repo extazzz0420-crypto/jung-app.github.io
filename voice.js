@@ -58,7 +58,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-button'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-no-duck'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();
@@ -67,9 +67,6 @@
           this.outputSamples = new Float32Array(256);
         }
         this.limiter = createLimiter(this.context, this.analyser || this.context.destination);
-        // One master level, lowered while a possible «стоп» is being checked.
-        this.master = this.context.createGain();
-        this.master.connect(this.limiter);
         this.capture = new AudioWorkletNode(this.context, 'jung-capture');
         this.input = this.context.createMediaStreamSource(stream);
         this.input.connect(this.capture);
@@ -109,7 +106,6 @@
         this.interrupt(false);
         this.speaking = false;
         this.preRoll = [];
-        this.endCheck(false);
         if (this.retry++ < 3) {
           this.status('Связь прервалась. После подключения повтори последнюю фразу.');
           this.reconnectTimer = setTimeout(() => this.connect(), 500 * 2 ** this.retry);
@@ -167,23 +163,6 @@
         if (this.preRoll.length > 30) this.preRoll.shift();
       }
     }
-    // Quieter playback while a possible «стоп» is checked, so the person feels heard.
-    duck(on) {
-      const gain = this.master?.gain;
-      if (!gain) return;
-      const now = this.context.currentTime;
-      gain.cancelScheduledValues?.(now);
-      // .15, not .3: the phone's echo cancellation lets the person through only when the
-      // reply is nearly silent (owner test 2026-10-14: «стоп» came back as fragments).
-      gain.setTargetAtTime ? gain.setTargetAtTime(on ? .15 : 1, now, .05) : (gain.value = on ? .15 : 1);
-    }
-    endCheck(restore) {
-      clearTimeout(this.checkTimer);
-      if (this.checking) this.send({ type: 'check_end' });
-      this.checking = false;
-      this.checkPending = false;
-      if (restore) this.duck(false);
-    }
     setMuted(value) {
       this.muted = value;
       this.stream?.getAudioTracks().forEach(track => { track.enabled = !value; });
@@ -196,7 +175,6 @@
       this.loudFrames = 0;
       this.preRoll = [];
       this.inputLevel = 0;
-      this.endCheck(true);
     }
     outputLevel() {
       if (!this.analyser || !this.sources.size) return 0;
@@ -214,7 +192,6 @@
       this.allSent = false;
       this.nextTime = 0;
       this.phrases = new Map();
-      this.endCheck(true);
     }
     message(event) {
       if (event.type === 'ready') { this.sequence = 0; this.turn = null; this.ready = true; this.status('Можешь говорить. Паузы отправляют фразу автоматически.'); return; }
@@ -226,24 +203,7 @@
       }
       if (event.type === 'listening') { this.status('Слушаю тебя…'); return; }
       if (event.type === 'minutes') { this.minutes(event); return; }
-      if (event.type === 'heard_as_turn') {
-        // The server took words sent as a stop check for the next turn.
-        this.endCheck(true);
-        this.turn = ++this.sequence;
-        this.awaiting = true;
-        this.allSent = false;
-        this.status('Проводник обдумывает ответ…');
-        return;
-      }
       if (event.type === 'generated') { if (event.turn === this.turn) this.allSent = true; return; }
-      if (event.type === 'check_ignored') { this.endCheck(true); return; }
-      if (event.type === 'stopped') {
-        // The server already cancelled the reply; only local playback stops here.
-        if (event.turn === this.turn) this.interrupt(false);
-        else this.endCheck(true);
-        this.status('Остановился. Слушаю тебя…');
-        return;
-      }
       if (event.type === 'done') {
         if (event.turn !== this.turn) return;
         this.awaiting = false;
@@ -288,7 +248,7 @@
       }
     }
     phraseOutput(phrase) {
-      const out = this.master || this.limiter || this.analyser || this.context.destination;
+      const out = this.limiter || this.analyser || this.context.destination;
       if (!this.context.createGain || phrase.gain === 1) return out;
       if (!phrase.node) {
         phrase.node = this.context.createGain();

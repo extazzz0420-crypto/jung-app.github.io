@@ -2,7 +2,7 @@
   "use strict";
 
   var configVersion = Date.now();
-  var assetVersion = "20261015-voice-button";
+  var assetVersion = "20261015-voice-no-duck";
   var timer;
   var failed = false;
 

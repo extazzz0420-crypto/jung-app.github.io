@@ -16,6 +16,9 @@
       this.retry = 0;
     }
     async start() {
+      if (!this.closed) return;
+      this.muted = false;
+      this.inputLevel = 0;
       this.closed = false;
       const epoch = ++this.epoch;
       this.status('Разреши микрофон, чтобы начать разговор.');
@@ -33,6 +36,12 @@
         this.stream = stream;
         await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261014-voice'), 10000);
         if (epoch !== this.epoch) return;
+        if (this.context.createAnalyser) {
+          this.analyser = this.context.createAnalyser();
+          this.analyser.fftSize = 256;
+          this.analyser.connect(this.context.destination);
+          this.outputSamples = new Float32Array(256);
+        }
         this.capture = new AudioWorkletNode(this.context, 'jung-capture');
         this.input = this.context.createMediaStreamSource(stream);
         this.input.connect(this.capture);
@@ -83,7 +92,8 @@
       if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(value));
     }
     captureFrame({ pcm, rms }) {
-      if (!this.ready || this.closed) return;
+      this.inputLevel = this.muted ? 0 : rms;
+      if (!this.ready || this.closed || this.muted) return;
       const now = performance.now();
       this.preRoll ||= [];
       if (rms > .025) {
@@ -113,6 +123,26 @@
         this.preRoll.push(pcm);
         if (this.preRoll.length > 10) this.preRoll.shift();
       }
+    }
+    setMuted(value) {
+      this.muted = value;
+      this.stream?.getAudioTracks().forEach(track => { track.enabled = !value; });
+      if (value && this.speaking) {
+        this.turn = ++this.sequence;
+        this.send({type: 'end'});
+        this.awaiting = true;
+      }
+      this.speaking = false;
+      this.loudFrames = 0;
+      this.preRoll = [];
+      this.inputLevel = 0;
+    }
+    outputLevel() {
+      if (!this.analyser || !this.sources.size) return 0;
+      this.analyser.getFloatTimeDomainData(this.outputSamples);
+      let sum = 0;
+      for (const value of this.outputSamples) sum += value * value;
+      return Math.sqrt(sum / this.outputSamples.length);
     }
     interrupt(notify = true) {
       if (notify && this.awaiting) this.send({ type: 'interrupt' });
@@ -161,7 +191,7 @@
         }
         const source = this.context.createBufferSource();
         source.buffer = buffer;
-        source.connect(this.context.destination);
+        source.connect(this.analyser || this.context.destination);
         phrase.playing++;
         phrase.samples += length;
         this.sources.add(source);
@@ -190,6 +220,8 @@
       this.closed = true;
       this.epoch++;
       this.ready = false;
+      this.inputLevel = 0;
+      this.analyser?.disconnect();
       clearTimeout(this.reconnectTimer);
       this.interrupt(false);
       this.ws?.close();

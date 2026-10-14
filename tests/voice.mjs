@@ -97,3 +97,16 @@ await startup;
 assert.ok(waiting.closed && deviceClosed,'timeout releases the audio device and permits retry');
 assert.match(startupStatus.at(-1),/Не удалось включить звук/);
 console.log('Suspended audio startup deadline and visible recovery: passed');
+
+// Muting suppresses outbound audio and clears pre-roll before the next utterance.
+const muted = new context.window.JungVoiceSession({base:'https://synthetic.test',initData:'signed',status(){}});
+muted.closed = false; muted.ready = true; muted.sequence = 0;
+const muteEvents = [];
+muted.ws = {readyState:1,send:data=>muteEvents.push(data)};
+const track = {enabled:true}; muted.stream = {getAudioTracks:()=>[track]};
+muted.setMuted(true);
+for (let i=0;i<5;i++) muted.captureFrame({pcm:new ArrayBuffer(960),rms:.5});
+assert.equal(muteEvents.length,0); assert.equal(track.enabled,false);
+muted.setMuted(false);
+assert.equal(track.enabled,true); assert.equal(muted.preRoll.length,0);
+console.log('Mute privacy and pre-roll reset: passed');

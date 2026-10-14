@@ -2718,59 +2718,158 @@ function attachVoiceEntry(root) {
     headers: apiHeaders(tg?.initData || '', false), signal: controller.signal,
   }).then(response => response.ok ? response.json() : null).then(data => {
     if (!data?.enabled || !root.isConnected) return;
-    const button = el('button', 'memory-secondary', 'Поговорить голосом');
+    const button = el('button', 'voice-entry', 'Поговорить голосом');
     button.type = 'button';
-    button.addEventListener('click', openVoiceScreen);
-    root.insertBefore(button, root.children[1] || null);
+    button.addEventListener('click', () => openVoiceScreen(data));
+    // Voice sits in the first "talk" block, as the primary way to start talking.
+    const talk = root.querySelector('.talk');
+    const chat = talk?.querySelector('.talk-cta');
+    if (talk && chat) {
+      chat.classList.add('talk-cta-secondary');
+      talk.insertBefore(button, chat);
+      return;
+    }
+    const entry = el('section', 'voice-entry-section');
+    entry.append(el('p', '', 'Можно просто поговорить'), button);
+    root.append(entry);
   }).catch(() => { /* Unavailable optional feature stays hidden; profile remains usable. */ })
     .finally(() => clearTimeout(timer));
 }
 
-function openVoiceScreen() {
+function openVoiceScreen(options = {}) {
+  if (document.querySelector('.voice-screen')) return;
   const dialog = el('dialog', 'voice-screen');
   dialog.setAttribute('aria-labelledby', 'voice-title');
+  const header = el('header', 'voice-header');
+  const heading = el('div');
+  const eyebrow = el('p', 'voice-eyebrow', 'MINDCOACH · ИИ-ПОДДЕРЖКА');
   const title = el('h2', 'serif', 'Разговор голосом');
   title.id = 'voice-title';
-  const intro = el('p', '', 'Тот же ИИ-проводник, который знает твой путь. Это психологическая поддержка, не медицинская помощь.');
-  const privacy = el('p', '', 'Действуют твои согласия и настройки памяти. Звук отправляется для распознавания, аудиозапись здесь не сохраняется.');
-  const status = el('p', 'voice-status', 'Выбери спокойное место. Можно говорить и перебивать ответ голосом.');
+  heading.append(eyebrow, title);
+  const settings = el('button', 'voice-small', 'Настройки');
+  settings.type = 'button';
+  settings.setAttribute('aria-expanded', 'false');
+  header.append(heading, settings);
+  const stage = el('div', 'voice-stage');
+  const orb = el('div', 'voice-orb');
+  orb.setAttribute('aria-hidden', 'true');
+  orb.append(el('div', 'voice-orb-core'), el('div', 'voice-orb-light'));
+  const status = el('p', 'voice-status', 'Можно говорить свободно');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const start = el('button', 'memory-chat', 'Начать разговор');
-  const interrupt = el('button', 'memory-secondary', 'Перебить ответ');
-  const finish = el('button', 'memory-secondary', 'Завершить разговор');
-  [start, interrupt, finish].forEach(button => { button.type = 'button'; });
-  interrupt.disabled = true;
-  let session;
+  const hint = el('p', 'voice-hint', 'Ответ можно перебить голосом.');
+  stage.append(orb, status, hint);
+  const panel = el('section', 'voice-settings');
+  panel.hidden = true;
+  panel.setAttribute('aria-label', 'Настройки разговора');
+  const panelTitle = el('h3', 'serif', 'Как тебе комфортнее');
+  const form = el('form');
+  const addSelect = (name, label, choices, selected) => {
+    const field = el('label', 'voice-field', label);
+    const select = el('select');
+    select.name = name;
+    choices.forEach(choice => {
+      const option = el('option', '', choice.label);
+      option.value = choice.id;
+      option.selected = choice.id === selected;
+      select.append(option);
+    });
+    field.append(select); form.append(field);
+    return select;
+  };
+  let prefs = options.preferences || {voice: 'sarah', style: 'warm'};
+  const voice = addSelect('voice', 'Голос', options.voices || [{id:'sarah',label:'Sarah · женский'}], prefs.voice);
+  const style = addSelect('style', 'Стиль общения', options.styles || [{id:'warm',label:'Тёплый'}], prefs.style);
+  const note = el('p', 'voice-hint', 'Стиль общий с чатом. Настройки применяются к следующей реплике.');
+  const save = el('button', 'memory-chat', 'Сохранить настройки');
+  save.type = 'submit';
+  const saved = el('p', 'voice-settings-status');
+  saved.setAttribute('role', 'status');
+  form.append(note, save, saved);
+  panel.append(panelTitle, form);
+  const footer = el('footer', 'voice-footer');
+  const start = el('button', 'memory-chat voice-start', 'Начать разговор');
+  const controls = el('div', 'voice-controls');
+  const mute = el('button', 'voice-control', 'Микрофон включён');
+  mute.setAttribute('aria-pressed', 'false');
+  const interrupt = el('button', 'voice-control', 'Перебить');
+  const finish = el('button', 'voice-control voice-finish', 'Закончить');
+  [start, mute, interrupt, finish].forEach(button => { button.type = 'button'; });
+  controls.append(mute, interrupt, finish);
+  const privacy = el('p', 'voice-privacy', 'Аудиозапись не сохраняется. Память работает по твоим настройкам. Это поддержка ИИ, не медицинская помощь.');
+  footer.append(start, controls, privacy);
+  let session, frame, lastFrame = 0, level = 0;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const sync = () => {
+    const active = session && !session.closed;
+    start.hidden = !!active;
+    mute.disabled = !session?.ready;
+    interrupt.disabled = !session?.awaiting;
+    mute.textContent = session?.muted ? 'Микрофон выключен' : 'Микрофон включён';
+    mute.setAttribute('aria-pressed', String(!!session?.muted));
+    orb.dataset.state = !active ? 'idle' : session.sources.size ? 'playing' : session.muted ? 'muted' : session.awaiting ? 'thinking' : session.ready ? 'listening' : 'connecting';
+  };
   session = new window.JungVoiceSession({
     base: window.JUNG_CONFIG.API_BASE, initData: tg.initData,
-    status(text) {
-      status.textContent = text;
-      start.disabled = session ? !session.closed : false;
-      interrupt.disabled = session ? session.closed : true;
-    },
+    status(text) { status.textContent = text; sync(); },
   });
-  start.addEventListener('click', () => { session.retry = 0; session.start(); });
-  interrupt.addEventListener('click', () => { session.interrupt(); status.textContent = 'Слушаю тебя…'; });
+  const animate = now => {
+    if (!dialog.isConnected || document.hidden) return;
+    if (now - lastFrame >= 33) {
+      lastFrame = now; sync();
+      const signal = session.closed ? 0 : Math.max(session.inputLevel || 0, session.outputLevel());
+      level += (Math.min(1, signal * 5) - level) * .3;
+      orb.style.setProperty('--voice-level', reducedMotion.matches ? 0 : level.toFixed(3));
+    }
+    frame = requestAnimationFrame(animate);
+  };
   const stop = () => {
-    session.stop();
-    dialog.close();
-    dialog.remove();
+    session.stop(); cancelAnimationFrame(frame);
+    dialog.close(); dialog.remove();
     document.removeEventListener('visibilitychange', hidden);
   };
   const hidden = () => {
+    cancelAnimationFrame(frame);
     if (document.hidden) {
       session.stop();
-      status.textContent = 'Разговор остановлен, пока приложение скрыто. Нажми «Начать разговор».';
-      start.disabled = false;
-      interrupt.disabled = true;
-    }
+      status.textContent = 'Разговор остановлен. Нажми «Начать разговор», когда вернёшься.';
+      sync();
+    } else frame = requestAnimationFrame(animate);
   };
+  start.addEventListener('click', () => {
+    panel.hidden = true; settings.setAttribute('aria-expanded', 'false');
+    stage.hidden = false; session.retry = 0; session.start(); sync();
+  });
+  mute.addEventListener('click', () => {
+    session.setMuted(!session.muted);
+    status.textContent = session.muted ? 'Микрофон выключен. Ответ продолжит звучать.' : 'Слушаю тебя…';
+    sync();
+  });
+  interrupt.addEventListener('click', () => { session.interrupt(); status.textContent = 'Слушаю тебя…'; sync(); });
   finish.addEventListener('click', stop);
+  settings.addEventListener('click', () => {
+    panel.hidden = !panel.hidden; stage.hidden = !panel.hidden;
+    settings.setAttribute('aria-expanded', String(!panel.hidden));
+    if (!panel.hidden) voice.focus();
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); save.disabled = true; saved.textContent = 'Сохраняю…';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+    try {
+      const response = await fetch(freshApiUrl('/api/voice/settings'), {
+        method: 'POST', headers: apiHeaders(tg.initData, true), signal: controller.signal,
+        body: JSON.stringify({voice:voice.value, style:style.value}),
+      });
+      if (!response.ok) throw new Error('Settings unavailable');
+      prefs = (await response.json()).preferences; options.preferences = prefs;
+      saved.textContent = session.closed ? 'Сохранено. Можно начать разговор.' : 'Сохранено. Применится к следующей реплике.';
+    } catch { saved.textContent = 'Не удалось сохранить. Попробуй ещё раз.'; }
+    finally { clearTimeout(timer); save.disabled = false; }
+  });
   dialog.addEventListener('cancel', event => { event.preventDefault(); stop(); });
   document.addEventListener('visibilitychange', hidden);
-  dialog.append(title, intro, status, start, interrupt, finish, privacy);
-  document.body.appendChild(dialog);
-  dialog.showModal();
-  start.focus();
+  dialog.append(header, stage, panel, footer);
+  document.body.appendChild(dialog); dialog.showModal(); sync();
+  frame = requestAnimationFrame(animate); start.focus();
 }

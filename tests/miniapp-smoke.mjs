@@ -302,3 +302,10 @@ assert.equal(
 );
 
 console.log("Mini App redesign smoke passed");
+
+// The voice entry is the primary action of the first "talk" block, not a footer link.
+const voiceEntry = app.match(/function attachVoiceEntry\(root\) \{[\s\S]*?\n\}/)?.[0];
+assert.ok(voiceEntry, 'voice entry must stay findable');
+assert.match(voiceEntry, /root\.querySelector\('\.talk'\)/);
+assert.match(voiceEntry, /talk\.insertBefore\(button, chat\)/);
+console.log('Voice entry placement contract passed');

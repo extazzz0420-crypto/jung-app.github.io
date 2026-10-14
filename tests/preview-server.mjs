@@ -288,7 +288,7 @@ createServer(async (req, res) => {
         }
         res.end(JSON.stringify({profile: fixture(), recorded: true})); return;
       }
-      if (url.pathname.endsWith("/voice/status")) { res.end(JSON.stringify({enabled: true})); return; }
+      if (url.pathname.endsWith("/voice/status")) { res.end(JSON.stringify({enabled: true, preferences:{voice:"sarah",style:"warm"}, voices:[{id:"sarah",label:"Sarah · женский"},{id:"alice",label:"Alice · женский"},{id:"george",label:"George · мужской"},{id:"brian",label:"Brian · мужской"}],styles:[{id:"warm",label:"Тёплый"},{id:"direct",label:"Прямой"},{id:"friendly",label:"Дружеский"},{id:"raw",label:"С характером"}]})); return; }
       res.end(JSON.stringify({profile: fixture(url.pathname.includes("/paid/"))})); return;
     }
     if (url.pathname === "/preview-runtime.js") {

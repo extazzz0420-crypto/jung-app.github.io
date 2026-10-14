@@ -125,4 +125,36 @@ for (let i = 0; i < 4; i++) s.frame(.1);
 for (let i = 0; i < 40; i++) s.frame(0);
 assert.equal(sent(s, 'check'), 0, 'short noise while thinking keeps the answer');
 
+// Owner 2026-10-14: answering right after the guide finished was taken for a stop check
+// and lost. Once every phrase was sent and played, speech is the next turn.
+s = session();
+s.voice.message({ type: 'phrase_end', turn: 1, phrase: 0 });
+s.voice.message({ type: 'generated', turn: 1 });
+s.sources.forEach(source => source.onended?.());
+time += 200;
+for (let i = 0; i < 6; i++) s.frame(.1);
+time += 750; s.frame(0);
+assert.equal(sent(s, 'check'), 0, 'an answer after the reply is not a stop check');
+assert.equal(sent(s, 'end'), 1, 'it is sent as the next turn');
+
+// The guide's last word echoing in the room right after playback does not start a turn.
+s = session();
+s.voice.message({ type: 'generated', turn: 1 });
+s.sources.forEach(source => source.onended?.());
+for (let i = 0; i < 4; i++) s.frame(.1);
+time += 750; s.frame(0);
+assert.equal(sent(s, 'end'), 0, 'echo tail is ignored');
+
+// While phrases are still coming, speech stays a stop candidate.
+s = session();
+s.sources.forEach(source => source.onended?.());
+time += 200;
+for (let i = 0; i < 30; i++) s.frame(.1);
+assert.equal(sent(s, 'check'), 1, 'between phrases the guide is still answering');
+// The server took those words for the next turn: the client follows its numbering.
+s.voice.message({ type: 'heard_as_turn' });
+assert.equal(s.voice.turn, 2);
+assert.equal(s.voice.awaiting, true);
+assert.equal(s.voice.master.gain.value, 1, 'volume restored');
+
 console.log('Voice stop by spoken command, noise, backchannel and echo: passed');

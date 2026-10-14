@@ -33,7 +33,7 @@
   function loadMiniApp() {
     afterDomReady(function () {
       var boot = document.createElement("script");
-      boot.src = "./miniapp-boot.js?v=20261015-voice-fresh";
+      boot.src = "./miniapp-boot.js?v=20261015-voice-ru";
       document.body.appendChild(boot);
     });
   }

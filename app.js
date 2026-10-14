@@ -2769,8 +2769,6 @@ function openVoiceScreen(options = {}) {
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, скажи «стоп» или «подожди».');
-  // With the microphone on, Android plays through the call volume, not the media one.
-  const volume = el('p', 'voice-hint', 'Тихо? Прибавь громкость кнопками телефона прямо во время разговора.');
   // Voice is metered in spoken minutes; the person always sees what is left.
   const meter = el('p', 'voice-hint voice-minutes');
   const showMinutes = data => {
@@ -2778,7 +2776,7 @@ function openVoiceScreen(options = {}) {
     if (data) meter.textContent = voiceMinutesText(data);
   };
   showMinutes(options.minutes);
-  stage.append(orb, status, hint, volume, meter);
+  stage.append(orb, status, hint, meter);
   const panel = el('section', 'voice-settings');
   panel.hidden = true;
   panel.setAttribute('aria-label', 'Настройки разговора');
@@ -2824,6 +2822,14 @@ function openVoiceScreen(options = {}) {
   form.append(voiceList);
   const selectedVoice = () => form.querySelector('input[name="voice"]:checked')?.value || prefs.voice;
   const style = addSelect('style', 'Стиль общения', options.styles || [{id:'warm',label:'Тёплый'}], prefs.style);
+  // Per device: it is about this phone's speaker, not the person's profile.
+  const loudField = el('label', 'voice-field voice-loud');
+  const loud = el('input');
+  loud.type = 'checkbox'; loud.name = 'loud';
+  try { loud.checked = localStorage.getItem('jungVoiceLoud') === '1'; } catch { loud.checked = false; }
+  loudField.append(loud, el('span', '', 'Громкий звук'));
+  const loudNote = el('p', 'voice-hint', 'Телефон играет голос тише, пока включён микрофон. Громкий звук это отключает, но «стоп» тогда нужно говорить громче проводника. Применится к следующему разговору.');
+  form.append(loudField, loudNote);
   const note = el('p', 'voice-hint', 'Стиль общий с чатом. Настройки применяются к следующей реплике.');
   const save = el('button', 'memory-chat', 'Сохранить настройки');
   save.type = 'submit';
@@ -2860,6 +2866,11 @@ function openVoiceScreen(options = {}) {
     base: window.JUNG_CONFIG.API_BASE, initData: tg.initData,
     status(text) { status.textContent = text; sync(); },
     minutes: showMinutes,
+    loud: loud.checked,
+  });
+  loud.addEventListener('change', () => {
+    session.loud = loud.checked;
+    try { localStorage.setItem('jungVoiceLoud', loud.checked ? '1' : '0'); } catch { /* per-device convenience only */ }
   });
   const animate = now => {
     if (!dialog.isConnected || document.hidden) return;

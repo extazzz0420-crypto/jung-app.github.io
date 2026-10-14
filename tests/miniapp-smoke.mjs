@@ -338,4 +338,6 @@ assert.equal(voiceMinutesText({ kind: 'plan', used_seconds: 3600, left_seconds: 
   'Минуты голоса на этот период закончились.');
 assert.match(voiceMinutesText({ kind: 'owner', used_seconds: 600, left_seconds: 3000, limit_minutes: 60 }), /без ограничения/);
 console.log('Voice minutes are shown and updated: passed');
-assert.match(voiceScreen, /кнопками телефона/, 'the screen tells how to make the voice louder');
+assert.doesNotMatch(voiceScreen, /кнопками телефона/, 'owner 2026-10-14: no volume-button hint, the volume is at max');
+assert.match(voiceScreen, /'Громкий звук'/, 'a loud mode switch exists');
+assert.match(voiceScreen, /loud: loud\.checked/, 'the switch reaches the voice session');

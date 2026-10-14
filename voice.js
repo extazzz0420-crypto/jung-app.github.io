@@ -29,8 +29,8 @@
     return limiter;
   }
   class VoiceSession {
-    constructor({ base, initData, status, minutes = () => {}, socket = url => new WebSocket(url) }) {
-      Object.assign(this, { base, initData, status, minutes, socket });
+    constructor({ base, initData, status, minutes = () => {}, loud = false, socket = url => new WebSocket(url) }) {
+      Object.assign(this, { base, initData, status, minutes, loud, socket });
       this.sources = new Set();
       this.epoch = 0;
       this.closed = true;
@@ -47,7 +47,10 @@
         this.context = new AudioContext();
         await bounded(this.context.resume(), 5000);
         const request = navigator.mediaDevices.getUserMedia({ audio: {
-          channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+          // «Громкий звук»: with echo cancellation on, Android plays the reply at the quieter
+          // call volume (owner 2026-10-14, volume at max). Off = media volume, but the
+          // person must speak over the guide to stop it.
+          channelCount: 1, echoCancellation: !this.loud, noiseSuppression: true, autoGainControl: !this.loud,
         } });
         request.then(stream => {
           if (epoch !== this.epoch) stream.getTracks().forEach(track => track.stop());
@@ -55,7 +58,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-fresh'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-ru'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();
@@ -125,7 +128,14 @@
       // While the guide answers, sustained speech above its own echo is only a candidate:
       // the server listens for «стоп», «стой», «подожди» and stops the reply only then.
       // Any sound used to cut the reply (owner phone test 2026-10-14).
-      const answering = this.awaiting || this.sources.size > 0;
+      // After the last phrase was sent and played, the guide is done: speech is the next
+      // turn, not a stop candidate (owner 2026-10-14: answers right after a reply were lost).
+      const answering = this.sources.size > 0 || (this.awaiting && !this.allSent);
+      if (!answering && !this.speaking && now < (this.quietUntil || 0)) {
+        this.preRoll.push(pcm);
+        if (this.preRoll.length > 30) this.preRoll.shift();
+        return;
+      }
       const threshold = answering ? this.echoThreshold(rms) : .025;
       if (rms > threshold) {
         this.lastVoice = now;
@@ -174,6 +184,7 @@
           this.send({ type: 'end' });
           this.speaking = false;
           this.awaiting = true;
+          this.allSent = false;
           this.loudFrames = 0;
           this.status('Проводник обдумывает ответ…');
         }
@@ -243,6 +254,7 @@
       this.sources.clear();
       this.turn = null;
       this.awaiting = false;
+      this.allSent = false;
       this.nextTime = 0;
       this.phrases = new Map();
       this.endCheck(true);
@@ -257,6 +269,16 @@
       }
       if (event.type === 'listening') { this.status('Слушаю тебя…'); return; }
       if (event.type === 'minutes') { this.minutes(event); return; }
+      if (event.type === 'heard_as_turn') {
+        // The server took words sent as a stop check for the next turn.
+        this.endCheck(true);
+        this.turn = ++this.sequence;
+        this.awaiting = true;
+        this.allSent = false;
+        this.status('Проводник обдумывает ответ…');
+        return;
+      }
+      if (event.type === 'generated') { if (event.turn === this.turn) this.allSent = true; return; }
       if (event.type === 'check_ignored') { this.endCheck(true); return; }
       if (event.type === 'stopped') {
         // The server already cancelled the reply; only local playback stops here.
@@ -298,6 +320,8 @@
         this.sources.add(source);
         source.onended = () => {
           this.sources.delete(source);
+          // The room's echo of the last word must not start a turn of its own.
+          if (!this.sources.size && this.allSent) this.quietUntil = performance.now() + (this.loud ? 600 : 150);
           phrase.playing--;
           this.acknowledge(event.turn, event.phrase, phrase);
         };

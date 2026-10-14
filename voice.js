@@ -118,11 +118,15 @@
       if (!this.ready || this.closed || this.muted) return;
       const now = performance.now();
       this.preRoll ||= [];
-      if (rms > .025) {
+      // While the guide answers, only sustained speech above its own echo interrupts:
+      // a cough, an «угу» or speaker leakage once cut 9 of 11 replies (audit 2026-10-14).
+      const answering = this.awaiting || this.sources.size > 0;
+      const threshold = answering ? Math.max(.025, this.outputLevel() * .5) : .025;
+      if (rms > threshold) {
         this.lastVoice = now;
         this.loudFrames = (this.loudFrames || 0) + 1;
-      } else this.loudFrames = 0;
-      if (!this.speaking && this.loudFrames >= 3) {
+      } else this.loudFrames = answering ? Math.max(0, (this.loudFrames || 0) - 1) : 0;
+      if (!this.speaking && this.loudFrames >= (answering ? 15 : 3)) {
         this.interrupt();
         this.speaking = true;
         this.startedSpeaking = now;
@@ -143,7 +147,8 @@
         }
       } else {
         this.preRoll.push(pcm);
-        if (this.preRoll.length > 10) this.preRoll.shift();
+        // 600 ms keeps the start of speech that had to last 300 ms before it counted.
+        if (this.preRoll.length > 30) this.preRoll.shift();
       }
     }
     setMuted(value) {

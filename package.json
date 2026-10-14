@@ -5,7 +5,7 @@
     "test": "npm run check:syntax && npm run check:html && npm run check:smoke",
     "check:syntax": "node --check app.js && node --check admin.js && node --check today-prompt.js && node --check attribution.js && node --check landing.js && node --check root-redirect.js && node --check miniapp-boot.js && node --check voice.js && node --check voice-worklet.js",
     "check:html": "html-validate '*.html'",
-    "check:smoke": "node tests/landing-smoke.mjs && node tests/today-prompt.mjs && node tests/miniapp-smoke.mjs && node tests/experiment-control.mjs && node tests/calm-core.mjs && node tests/admin-smoke.mjs && node tests/session-expiry.mjs && node tests/contrast.mjs && node tests/voice.mjs",
+    "check:smoke": "node tests/landing-smoke.mjs && node tests/today-prompt.mjs && node tests/miniapp-smoke.mjs && node tests/experiment-control.mjs && node tests/calm-core.mjs && node tests/admin-smoke.mjs && node tests/session-expiry.mjs && node tests/contrast.mjs && node tests/voice.mjs && node tests/voice-bargein.mjs",
     "preview": "node tests/preview-server.mjs"
   },
   "devDependencies": {

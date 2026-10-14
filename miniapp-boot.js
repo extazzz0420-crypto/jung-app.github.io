@@ -2,7 +2,7 @@
   "use strict";
 
   var configVersion = Date.now();
-  var assetVersion = "20261014-voice-tune";
+  var assetVersion = "20261015-voice-cost";
   var timer;
   var failed = false;
 

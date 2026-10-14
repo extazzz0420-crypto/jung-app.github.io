@@ -2736,6 +2736,17 @@ function attachVoiceEntry(root) {
     .finally(() => clearTimeout(timer));
 }
 
+// Only speech is counted: the person's words and the replies heard to the end.
+function voiceMinutesText({ kind, used_seconds: used = 0, left_seconds: left = 0, limit_minutes: limit = 0 }) {
+  const whole = seconds => Math.floor(seconds / 60);
+  if (kind === 'owner') return `Голос: ${whole(used)} мин за период, без ограничения.`;
+  if (left <= 0) return kind === 'trial' ? 'Пробные минуты голоса закончились.' : 'Минуты голоса на этот период закончились.';
+  if (left < 60) return 'Осталось меньше минуты голоса.';
+  return kind === 'trial'
+    ? `Пробный голос: осталось ${whole(left)} мин из ${limit}. Считается только речь.`
+    : `Голос: осталось ${whole(left)} мин из ${limit} на период. Считается только речь.`;
+}
+
 function openVoiceScreen(options = {}) {
   if (document.querySelector('.voice-screen')) return;
   const dialog = el('dialog', 'voice-screen');
@@ -2758,7 +2769,14 @@ function openVoiceScreen(options = {}) {
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, скажи «стоп» или «подожди».');
-  stage.append(orb, status, hint);
+  // Voice is metered in spoken minutes; the person always sees what is left.
+  const meter = el('p', 'voice-hint voice-minutes');
+  const showMinutes = data => {
+    meter.hidden = !data;
+    if (data) meter.textContent = voiceMinutesText(data);
+  };
+  showMinutes(options.minutes);
+  stage.append(orb, status, hint, meter);
   const panel = el('section', 'voice-settings');
   panel.hidden = true;
   panel.setAttribute('aria-label', 'Настройки разговора');
@@ -2839,6 +2857,7 @@ function openVoiceScreen(options = {}) {
   session = new window.JungVoiceSession({
     base: window.JUNG_CONFIG.API_BASE, initData: tg.initData,
     status(text) { status.textContent = text; sync(); },
+    minutes: showMinutes,
   });
   const animate = now => {
     if (!dialog.isConnected || document.hidden) return;

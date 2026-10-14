@@ -323,3 +323,18 @@ assert.match(voiceScreen, /`Послушать голос \$\{name\}`/, 'play bu
 assert.doesNotMatch(voiceScreen, /'Перебить'/, 'a spoken «стоп» replaces the interrupt button');
 assert.match(voiceScreen, /«стоп»/, 'the screen tells how to stop the guide');
 console.log('Voice settings back, return-after-save, per-voice preview, spoken stop: passed');
+
+// Voice minutes (owner decision 2026-10-14): what is left is always visible and honest.
+assert.match(voiceScreen, /showMinutes\(options\.minutes\)/, 'the screen shows minutes on open');
+assert.match(voiceScreen, /minutes: showMinutes/, 'minutes update after every turn');
+const minutesSource = app.match(/function voiceMinutesText\([\s\S]*?\n\}/)?.[0];
+assert.ok(minutesSource, 'minutes text must stay findable');
+const voiceMinutesText = new Function(`${minutesSource}; return voiceMinutesText;`)();
+assert.equal(voiceMinutesText({ kind: 'trial', used_seconds: 70, left_seconds: 230, limit_minutes: 5 }),
+  'Пробный голос: осталось 3 мин из 5. Считается только речь.');
+assert.equal(voiceMinutesText({ kind: 'plan', used_seconds: 3570, left_seconds: 30, limit_minutes: 60 }),
+  'Осталось меньше минуты голоса.');
+assert.equal(voiceMinutesText({ kind: 'plan', used_seconds: 3600, left_seconds: 0, limit_minutes: 60 }),
+  'Минуты голоса на этот период закончились.');
+assert.match(voiceMinutesText({ kind: 'owner', used_seconds: 600, left_seconds: 3000, limit_minutes: 60 }), /без ограничения/);
+console.log('Voice minutes are shown and updated: passed');

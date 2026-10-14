@@ -29,8 +29,8 @@
     return limiter;
   }
   class VoiceSession {
-    constructor({ base, initData, status, socket = url => new WebSocket(url) }) {
-      Object.assign(this, { base, initData, status, socket });
+    constructor({ base, initData, status, minutes = () => {}, socket = url => new WebSocket(url) }) {
+      Object.assign(this, { base, initData, status, minutes, socket });
       this.sources = new Set();
       this.epoch = 0;
       this.closed = true;
@@ -55,7 +55,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-stop'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-minutes'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();
@@ -126,7 +126,7 @@
       // the server listens for «стоп», «стой», «подожди» and stops the reply only then.
       // Any sound used to cut the reply (owner phone test 2026-10-14).
       const answering = this.awaiting || this.sources.size > 0;
-      const threshold = answering ? Math.max(.025, this.outputLevel() * .5) : .025;
+      const threshold = answering ? this.echoThreshold(rms) : .025;
       if (rms > threshold) {
         this.lastVoice = now;
         this.loudFrames = (this.loudFrames || 0) + 1;
@@ -144,7 +144,8 @@
         return;
       }
       if (answering && !this.speaking) {
-        if (!this.checkPending && this.loudFrames >= 15) {
+        if (!this.checkPending && this.loudFrames >= 10) {
+          this.levels.checks++;
           this.checking = true;
           this.checkStarted = now;
           this.duck(true);
@@ -181,6 +182,22 @@
         // 600 ms keeps the start of speech that had to last 300 ms before it counted.
         if (this.preRoll.length > 30) this.preRoll.shift();
       }
+    }
+    // Echo cancellation removes most of the guide's voice from the microphone and dims the
+    // person too. The bar follows what really leaks into the microphone (the echo ratio,
+    // learned fast downward while the person is quiet), not the loudness of the reply.
+    // Owner phone test 2026-10-14: half the output level hid every spoken «стоп».
+    echoThreshold(rms) {
+      this.outEnv = Math.max(this.outputLevel(), (this.outEnv || 0) * .85);
+      const ratio = this.echoRatio ?? .5;
+      if (this.outEnv > .01) {
+        const now = rms / this.outEnv;
+        this.echoRatio = now < ratio ? ratio * .8 + now * .2 : ratio + (now - ratio) * .01;
+      }
+      this.levels ||= { mic: 0, out: 0, checks: 0 };
+      this.levels.mic = Math.max(this.levels.mic, rms);
+      this.levels.out = Math.max(this.levels.out, this.outEnv);
+      return Math.max(.02, this.outEnv * (this.echoRatio ?? .5) * 2);
     }
     // Quieter playback while a possible «стоп» is checked, so the person feels heard.
     duck(on) {
@@ -237,6 +254,7 @@
         return;
       }
       if (event.type === 'listening') { this.status('Слушаю тебя…'); return; }
+      if (event.type === 'minutes') { this.minutes(event); return; }
       if (event.type === 'check_ignored') { this.endCheck(true); return; }
       if (event.type === 'stopped') {
         // The server already cancelled the reply; only local playback stops here.
@@ -247,6 +265,11 @@
       }
       if (event.type === 'done') {
         if (event.turn !== this.turn) return;
+        // Numbers only: lets the server log show why a spoken «стоп» was or was not heard.
+        const levels = this.levels || { mic: 0, out: 0, checks: 0 };
+        this.send({ type: 'levels', turn: event.turn, mic_peak: levels.mic, out_peak: levels.out,
+          echo: this.echoRatio ?? -1, checks: levels.checks });
+        this.levels = { mic: 0, out: 0, checks: 0 };
         this.awaiting = false;
         if (!this.speaking && !this.errorState) this.status('Слушаю тебя…');
         return;

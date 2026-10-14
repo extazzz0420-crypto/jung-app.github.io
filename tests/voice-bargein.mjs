@@ -100,6 +100,23 @@ for (let i = 0; i < 40; i++) s.frame(.25);
 assert.equal(sent(s, 'check'), 1, 'a voice louder than the echo is checked');
 outputRms = 0;
 
+// Phone case (owner test 2026-10-14 after 02944de): the reply plays at -16 dBFS, the
+// phone's echo cancellation leaves a faint residue and also dims the person's voice.
+// «Стоп» at .05 never reached the server because the bar was half the output level.
+outputRms = .16;
+s = session();
+for (let i = 0; i < 40; i++) s.frame(.008);
+assert.equal(sent(s, 'check'), 0, 'cancelled echo residue is not speech');
+for (let i = 0; i < 20; i++) s.frame(i % 5 === 4 ? .01 : .05);
+for (let i = 0; i < 25; i++) s.frame(.008);
+assert.equal(sent(s, 'check'), 1, 'a dimmed «стоп» over a loud reply is checked');
+s.voice.message({ type: 'done', turn: 1 });
+const levels = s.events.find(event => event.type === 'levels');
+assert.ok(levels && levels.checks === 1 && levels.mic_peak >= .05 && levels.echo < .2,
+  'the turn reports only numbers: loudest voice, echo ratio, checks');
+assert.deepEqual(Object.keys(levels).sort(), ['checks', 'echo', 'mic_peak', 'out_peak', 'turn', 'type']);
+outputRms = 0;
+
 // While the guide is still thinking, a short noise is not checked.
 s = session();
 s.voice.interrupt(false);

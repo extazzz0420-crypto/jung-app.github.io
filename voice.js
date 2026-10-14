@@ -55,7 +55,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-minutes'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-fresh'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();
@@ -205,7 +205,9 @@
       if (!gain) return;
       const now = this.context.currentTime;
       gain.cancelScheduledValues?.(now);
-      gain.setTargetAtTime ? gain.setTargetAtTime(on ? .3 : 1, now, .05) : (gain.value = on ? .3 : 1);
+      // .15, not .3: the phone's echo cancellation lets the person through only when the
+      // reply is nearly silent (owner test 2026-10-14: «стоп» came back as fragments).
+      gain.setTargetAtTime ? gain.setTargetAtTime(on ? .15 : 1, now, .05) : (gain.value = on ? .15 : 1);
     }
     endCheck(restore) {
       clearTimeout(this.checkTimer);

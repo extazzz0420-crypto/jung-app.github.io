@@ -2769,6 +2769,8 @@ function openVoiceScreen(options = {}) {
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
   const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, скажи «стоп» или «подожди».');
+  // With the microphone on, Android plays through the call volume, not the media one.
+  const volume = el('p', 'voice-hint', 'Тихо? Прибавь громкость кнопками телефона прямо во время разговора.');
   // Voice is metered in spoken minutes; the person always sees what is left.
   const meter = el('p', 'voice-hint voice-minutes');
   const showMinutes = data => {
@@ -2776,7 +2778,7 @@ function openVoiceScreen(options = {}) {
     if (data) meter.textContent = voiceMinutesText(data);
   };
   showMinutes(options.minutes);
-  stage.append(orb, status, hint, meter);
+  stage.append(orb, status, hint, volume, meter);
   const panel = el('section', 'voice-settings');
   panel.hidden = true;
   panel.setAttribute('aria-label', 'Настройки разговора');

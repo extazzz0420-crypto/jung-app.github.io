@@ -3732,3 +3732,21 @@ body {
 .state-action--quiet {
   box-shadow: none;
 }
+
+.voice-screen {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line, #d8d9d1);
+  border-radius: 16px;
+  width: min(100% - 32px, 480px);
+  max-height: calc(100dvh - 48px);
+  box-sizing: border-box;
+  padding: 24px;
+  overflow-y: auto;
+  line-height: 1.6;
+}
+.voice-screen::backdrop { background: rgb(0 0 0 / 45%); }
+.voice-screen h2 { margin-top: 0; }
+.voice-screen button { display: block; width: 100%; min-height: 48px; margin: 12px 0; }
+.voice-screen button:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.voice-status { min-height: 80px; padding: 16px 0; font-weight: 600; }

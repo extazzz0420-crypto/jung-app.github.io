@@ -2487,6 +2487,7 @@ function renderProfile(p) {
   root.appendChild(top);
 
   root.appendChild(understandingScreen(p));
+  attachVoiceEntry(root);
   return root;
 }
 function fmtDate(iso) {
@@ -2708,3 +2709,68 @@ async function main() {
 }
 
 main();
+
+// Owner rollout availability comes from the authenticated server, not public config.
+function attachVoiceEntry(root) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+  fetch(freshApiUrl('/api/voice/status'), {
+    headers: apiHeaders(tg?.initData || '', false), signal: controller.signal,
+  }).then(response => response.ok ? response.json() : null).then(data => {
+    if (!data?.enabled || !root.isConnected) return;
+    const button = el('button', 'memory-secondary', 'Поговорить голосом');
+    button.type = 'button';
+    button.addEventListener('click', openVoiceScreen);
+    root.insertBefore(button, root.children[1] || null);
+  }).catch(() => { /* Unavailable optional feature stays hidden; profile remains usable. */ })
+    .finally(() => clearTimeout(timer));
+}
+
+function openVoiceScreen() {
+  const dialog = el('dialog', 'voice-screen');
+  dialog.setAttribute('aria-labelledby', 'voice-title');
+  const title = el('h2', 'serif', 'Разговор голосом');
+  title.id = 'voice-title';
+  const intro = el('p', '', 'Тот же ИИ-проводник, который знает твой путь. Это психологическая поддержка, не медицинская помощь.');
+  const privacy = el('p', '', 'Действуют твои согласия и настройки памяти. Звук отправляется для распознавания, аудиозапись здесь не сохраняется.');
+  const status = el('p', 'voice-status', 'Выбери спокойное место. Можно говорить и перебивать ответ голосом.');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  const start = el('button', 'memory-chat', 'Начать разговор');
+  const interrupt = el('button', 'memory-secondary', 'Перебить ответ');
+  const finish = el('button', 'memory-secondary', 'Завершить разговор');
+  [start, interrupt, finish].forEach(button => { button.type = 'button'; });
+  interrupt.disabled = true;
+  let session;
+  session = new window.JungVoiceSession({
+    base: window.JUNG_CONFIG.API_BASE, initData: tg.initData,
+    status(text) {
+      status.textContent = text;
+      start.disabled = session ? !session.closed : false;
+      interrupt.disabled = session ? session.closed : true;
+    },
+  });
+  start.addEventListener('click', () => { session.retry = 0; session.start(); });
+  interrupt.addEventListener('click', () => { session.interrupt(); status.textContent = 'Слушаю тебя…'; });
+  const stop = () => {
+    session.stop();
+    dialog.close();
+    dialog.remove();
+    document.removeEventListener('visibilitychange', hidden);
+  };
+  const hidden = () => {
+    if (document.hidden) {
+      session.stop();
+      status.textContent = 'Разговор остановлен, пока приложение скрыто. Нажми «Начать разговор».';
+      start.disabled = false;
+      interrupt.disabled = true;
+    }
+  };
+  finish.addEventListener('click', stop);
+  dialog.addEventListener('cancel', event => { event.preventDefault(); stop(); });
+  document.addEventListener('visibilitychange', hidden);
+  dialog.append(title, intro, status, start, interrupt, finish, privacy);
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  start.focus();
+}

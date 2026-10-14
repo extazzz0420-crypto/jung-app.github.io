@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
-const files = new Set(["app.js", "styles.css", "today-prompt.js", "favicon.svg", "admin.js", "admin.css"]);
+const files = new Set(["app.js", "styles.css", "today-prompt.js", "favicon.svg", "admin.js", "admin.css", "voice.js", "voice-worklet.js"]);
 const mime = { js: "text/javascript", css: "text/css", svg: "image/svg+xml" };
 let revision = 0;
 
@@ -247,6 +247,8 @@ const runtime = `
     BackButton: {show(){}, hide(){}, onClick(){}}, HapticFeedback: {selectionChanged(){}},
     openInvoice(url, done) {done('cancelled');}
   }};
+  if (query.get('voice') === 'denied') window.AudioContext = class { async resume() {} async close() {} };
+  if (query.get('voice') === 'denied') Object.defineProperty(navigator, 'mediaDevices', {value: {getUserMedia: async () => {throw new DOMException('Synthetic denial', 'NotAllowedError');}}});
   if (document.getElementById('preview-refresh')) document.getElementById('preview-refresh').onclick = () => refreshProfileView();
 `;
 
@@ -286,6 +288,7 @@ createServer(async (req, res) => {
         }
         res.end(JSON.stringify({profile: fixture(), recorded: true})); return;
       }
+      if (url.pathname.endsWith("/voice/status")) { res.end(JSON.stringify({enabled: true})); return; }
       res.end(JSON.stringify({profile: fixture(url.pathname.includes("/paid/"))})); return;
     }
     if (url.pathname === "/preview-runtime.js") {
@@ -311,7 +314,7 @@ createServer(async (req, res) => {
         <button type="button" id="preview-refresh">Смоделировать обновление</button>
         <span id="preview-status" role="status"></span></aside>
         <main class="app" id="app"></main><p id="action-status" class="sr-only" role="status" aria-live="polite"></p>
-        <script src="/preview-runtime.js"></script><script src="/today-prompt.js"></script><script src="/app.js"></script>
+        <script src="/preview-runtime.js"></script><script src="/today-prompt.js"></script><script src="/voice.js"></script><script src="/app.js"></script>
         </body></html>`); return;
     }
     const name = url.pathname.slice(1);

@@ -33,7 +33,7 @@
   function loadMiniApp() {
     afterDomReady(function () {
       var boot = document.createElement("script");
-      boot.src = "./miniapp-boot.js?v=20260919-readable-memory";
+      boot.src = "./miniapp-boot.js?v=20261014-voice";
       document.body.appendChild(boot);
     });
   }

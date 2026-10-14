@@ -2,7 +2,7 @@
   "use strict";
 
   var configVersion = Date.now();
-  var assetVersion = "20260919-readable-memory";
+  var assetVersion = "20261014-voice";
   var timer;
   var failed = false;
 
@@ -38,11 +38,17 @@
     var today = document.createElement("script");
     today.src = "./today-prompt.js?v=" + assetVersion;
     today.onload = function () {
+      var voice = document.createElement("script");
+      voice.src = "./voice.js?v=" + assetVersion;
+      voice.onerror = showFailure;
+      voice.onload = function () {
       var app = document.createElement("script");
       app.src = "./app.js?v=" + assetVersion;
       app.onload = function () { clearTimeout(timer); };
       app.onerror = showFailure;
       document.body.appendChild(app);
+      };
+      document.body.appendChild(voice);
     };
     today.onerror = showFailure;
     document.body.appendChild(today);

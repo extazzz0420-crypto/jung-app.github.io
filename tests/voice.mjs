@@ -82,6 +82,26 @@ assert.equal(frame.pcm.byteLength, 1024);
 assert.ok(frame.rms > .09 && frame.rms < .11);
 console.log('Actual capture worklet: 48 kHz -> 24 kHz mono PCM passed');
 
+// High tones above 12 kHz must not fold back into the speech band when 48 kHz becomes
+// 24 kHz (aliasing): an 18 kHz tone would otherwise come out as a loud 6 kHz one.
+const antiAlias = new Processor();
+let phase18 = 0;
+for (let block = 0; block < 32; block++) {
+  const samples = new Float32Array(128);
+  for (let i = 0; i < 128; i++, phase18++) samples[i] = .1 * Math.sin(2 * Math.PI * 18000 * phase18 / 48000);
+  antiAlias.process([[samples]]);
+}
+assert.ok(frame.rms < .012, `18 kHz tone must be filtered before decimation, rms ${frame.rms}`);
+const speechBand = new Processor();
+let phase1k = 0;
+for (let block = 0; block < 32; block++) {
+  const samples = new Float32Array(128);
+  for (let i = 0; i < 128; i++, phase1k++) samples[i] = .1 * Math.sin(2 * Math.PI * 1000 * phase1k / 48000);
+  speechBand.process([[samples]]);
+}
+assert.ok(frame.rms > .065, `1 kHz speech band passes unchanged, rms ${frame.rms}`);
+console.log('Capture worklet anti-aliasing filter: passed');
+
 // A suspended audio device cannot leave the start button blocked forever.
 const startupTimers=[];
 const startupStatus=[];

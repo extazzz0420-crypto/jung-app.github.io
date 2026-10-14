@@ -316,5 +316,10 @@ assert.ok(voiceScreen, 'voice screen must stay findable');
 assert.match(voiceScreen, /'← Назад'/, 'open settings show a back button');
 assert.match(voiceScreen, /closeSettings\(/, 'saving returns to the conversation');
 assert.match(voiceScreen, /\/api\/voice\/preview/, 'voices can be previewed');
-assert.match(voiceScreen, /'Послушать'/);
-console.log('Voice settings back, return-after-save and preview: passed');
+// Owner 2026-10-14: choosing by description is odd; every voice has its own play button.
+assert.match(voiceScreen, /type = 'radio'/, 'voices are a visible list, not a dropdown');
+assert.match(voiceScreen, /voice-play/, 'each voice row has a play button');
+assert.match(voiceScreen, /`Послушать голос \$\{name\}`/, 'play buttons name their voice');
+assert.doesNotMatch(voiceScreen, /'Перебить'/, 'a spoken «стоп» replaces the interrupt button');
+assert.match(voiceScreen, /«стоп»/, 'the screen tells how to stop the guide');
+console.log('Voice settings back, return-after-save, per-voice preview, spoken stop: passed');

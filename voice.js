@@ -24,7 +24,7 @@
     if (!context.createDynamicsCompressor) return target;
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -3; limiter.knee.value = 3; limiter.ratio.value = 20;
-    limiter.attack.value = .003; limiter.release.value = .25;
+    limiter.attack.value = .001; limiter.release.value = .25;
     limiter.connect(target);
     return limiter;
   }
@@ -55,7 +55,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261014-voice'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-stop'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();
@@ -64,6 +64,9 @@
           this.outputSamples = new Float32Array(256);
         }
         this.limiter = createLimiter(this.context, this.analyser || this.context.destination);
+        // One master level, lowered while a possible «стоп» is being checked.
+        this.master = this.context.createGain();
+        this.master.connect(this.limiter);
         this.capture = new AudioWorkletNode(this.context, 'jung-capture');
         this.input = this.context.createMediaStreamSource(stream);
         this.input.connect(this.capture);
@@ -103,6 +106,7 @@
         this.interrupt(false);
         this.speaking = false;
         this.preRoll = [];
+        this.endCheck(false);
         if (this.retry++ < 3) {
           this.status('Связь прервалась. После подключения повтори последнюю фразу.');
           this.reconnectTimer = setTimeout(() => this.connect(), 500 * 2 ** this.retry);
@@ -118,16 +122,42 @@
       if (!this.ready || this.closed || this.muted) return;
       const now = performance.now();
       this.preRoll ||= [];
-      // While the guide answers, only sustained speech above its own echo interrupts:
-      // a cough, an «угу» or speaker leakage once cut 9 of 11 replies (audit 2026-10-14).
+      // While the guide answers, sustained speech above its own echo is only a candidate:
+      // the server listens for «стоп», «стой», «подожди» and stops the reply only then.
+      // Any sound used to cut the reply (owner phone test 2026-10-14).
       const answering = this.awaiting || this.sources.size > 0;
       const threshold = answering ? Math.max(.025, this.outputLevel() * .5) : .025;
       if (rms > threshold) {
         this.lastVoice = now;
         this.loudFrames = (this.loudFrames || 0) + 1;
       } else this.loudFrames = answering ? Math.max(0, (this.loudFrames || 0) - 1) : 0;
-      if (!this.speaking && this.loudFrames >= (answering ? 15 : 3)) {
-        this.interrupt();
+      if (this.checking) {
+        this.ws.send(pcm);
+        // A command is short: close the sample at a pause or after 2.5 s.
+        if (now - this.lastVoice > 400 || now - this.checkStarted > 2500) {
+          this.checking = false;
+          this.checkPending = true;
+          this.loudFrames = 0;
+          this.send({ type: 'check_end' });
+          this.checkTimer = setTimeout(() => this.endCheck(true), 8000);
+        }
+        return;
+      }
+      if (answering && !this.speaking) {
+        if (!this.checkPending && this.loudFrames >= 15) {
+          this.checking = true;
+          this.checkStarted = now;
+          this.duck(true);
+          this.send({ type: 'check' });
+          this.preRoll.forEach(frame => this.ws.send(frame));
+          this.preRoll = [];
+          return;
+        }
+        this.preRoll.push(pcm);
+        if (this.preRoll.length > 30) this.preRoll.shift();
+        return;
+      }
+      if (!this.speaking && this.loudFrames >= 3) {
         this.speaking = true;
         this.startedSpeaking = now;
         this.errorState = false;
@@ -143,6 +173,7 @@
           this.send({ type: 'end' });
           this.speaking = false;
           this.awaiting = true;
+          this.loudFrames = 0;
           this.status('Проводник обдумывает ответ…');
         }
       } else {
@@ -150,6 +181,21 @@
         // 600 ms keeps the start of speech that had to last 300 ms before it counted.
         if (this.preRoll.length > 30) this.preRoll.shift();
       }
+    }
+    // Quieter playback while a possible «стоп» is checked, so the person feels heard.
+    duck(on) {
+      const gain = this.master?.gain;
+      if (!gain) return;
+      const now = this.context.currentTime;
+      gain.cancelScheduledValues?.(now);
+      gain.setTargetAtTime ? gain.setTargetAtTime(on ? .3 : 1, now, .05) : (gain.value = on ? .3 : 1);
+    }
+    endCheck(restore) {
+      clearTimeout(this.checkTimer);
+      if (this.checking) this.send({ type: 'check_end' });
+      this.checking = false;
+      this.checkPending = false;
+      if (restore) this.duck(false);
     }
     setMuted(value) {
       this.muted = value;
@@ -163,6 +209,7 @@
       this.loudFrames = 0;
       this.preRoll = [];
       this.inputLevel = 0;
+      this.endCheck(true);
     }
     outputLevel() {
       if (!this.analyser || !this.sources.size) return 0;
@@ -179,6 +226,7 @@
       this.awaiting = false;
       this.nextTime = 0;
       this.phrases = new Map();
+      this.endCheck(true);
     }
     message(event) {
       if (event.type === 'ready') { this.sequence = 0; this.turn = null; this.ready = true; this.status('Можешь говорить. Паузы отправляют фразу автоматически.'); return; }
@@ -189,6 +237,14 @@
         return;
       }
       if (event.type === 'listening') { this.status('Слушаю тебя…'); return; }
+      if (event.type === 'check_ignored') { this.endCheck(true); return; }
+      if (event.type === 'stopped') {
+        // The server already cancelled the reply; only local playback stops here.
+        if (event.turn === this.turn) this.interrupt(false);
+        else this.endCheck(true);
+        this.status('Остановился. Слушаю тебя…');
+        return;
+      }
       if (event.type === 'done') {
         if (event.turn !== this.turn) return;
         this.awaiting = false;
@@ -223,7 +279,7 @@
         const start = Math.max(this.context.currentTime + .03, this.nextTime || 0);
         this.nextTime = start + buffer.duration;
         source.start(start);
-        this.status('Проводник говорит. Можешь перебить его голосом.');
+        if (!this.checking && !this.checkPending) this.status('Проводник говорит. Скажи «стоп», чтобы остановить.');
       }
       if (event.type === 'phrase_end' && phrase) {
         phrase.ended = true;
@@ -231,7 +287,7 @@
       }
     }
     phraseOutput(phrase) {
-      const out = this.limiter || this.analyser || this.context.destination;
+      const out = this.master || this.limiter || this.analyser || this.context.destination;
       if (!this.context.createGain || phrase.gain === 1) return out;
       if (!phrase.node) {
         phrase.node = this.context.createGain();
@@ -262,7 +318,7 @@
     }
   }
   // One-shot preview of a voice sample; returns a handle that stops playback.
-  VoiceSession.playPreview = async ({ pcm, sample_rate: rate, gain = 1 }) => {
+  VoiceSession.playPreview = async ({ pcm, sample_rate: rate, gain = 1 }, ended = () => {}) => {
     const context = new AudioContext();
     await bounded(context.resume(), 5000);
     const source = context.createBufferSource();
@@ -272,7 +328,7 @@
     source.connect(level);
     level.connect(createLimiter(context, context.destination));
     const stop = () => { try { source.stop(); } catch { /* already ended */ } context.close().catch(() => {}); };
-    source.onended = stop;
+    source.onended = () => { stop(); ended(); };
     source.start();
     return { stop };
   };

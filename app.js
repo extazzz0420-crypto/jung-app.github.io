@@ -2757,7 +2757,7 @@ function openVoiceScreen(options = {}) {
   const status = el('p', 'voice-status', 'Можно говорить свободно');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const hint = el('p', 'voice-hint', 'Ответ можно перебить голосом.');
+  const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, скажи «стоп» или «подожди».');
   stage.append(orb, status, hint);
   const panel = el('section', 'voice-settings');
   panel.hidden = true;
@@ -2778,11 +2778,31 @@ function openVoiceScreen(options = {}) {
     return select;
   };
   let prefs = options.preferences || {voice: 'sarah', style: 'warm'};
-  const voice = addSelect('voice', 'Голос', options.voices || [{id:'sarah',label:'Sarah · женский'}], prefs.voice);
-  const listen = el('button', 'voice-small voice-listen', 'Послушать');
-  listen.type = 'button';
-  listen.setAttribute('aria-label', 'Послушать выбранный голос');
-  voice.parentElement.after(listen);
+  // Every voice is a row with its own sample: choosing by description alone was odd.
+  const voiceList = el('fieldset', 'voice-list');
+  voiceList.append(el('legend', '', 'Голос'));
+  const plays = [];
+  (options.voices || [{id:'sarah',label:'Sarah · женский'}]).forEach(choice => {
+    const [name, about = ''] = choice.label.split(' · ');
+    const row = el('div', 'voice-option');
+    const label = el('label');
+    const radio = el('input');
+    radio.type = 'radio'; radio.name = 'voice'; radio.value = choice.id;
+    radio.checked = choice.id === prefs.voice;
+    const text = el('span', 'voice-option-text');
+    text.append(el('span', 'voice-option-name', name), el('span', 'voice-option-about', about));
+    label.append(radio, text);
+    const play = el('button', 'voice-play', '▶');
+    play.type = 'button';
+    play.dataset.voice = choice.id;
+    play.setAttribute('aria-label', `Послушать голос ${name}`);
+    play.setAttribute('aria-pressed', 'false');
+    plays.push(play);
+    row.append(label, play);
+    voiceList.append(row);
+  });
+  form.append(voiceList);
+  const selectedVoice = () => form.querySelector('input[name="voice"]:checked')?.value || prefs.voice;
   const style = addSelect('style', 'Стиль общения', options.styles || [{id:'warm',label:'Тёплый'}], prefs.style);
   const note = el('p', 'voice-hint', 'Стиль общий с чатом. Настройки применяются к следующей реплике.');
   const save = el('button', 'memory-chat', 'Сохранить настройки');
@@ -2796,20 +2816,22 @@ function openVoiceScreen(options = {}) {
   const controls = el('div', 'voice-controls');
   const mute = el('button', 'voice-control', 'Микрофон включён');
   mute.setAttribute('aria-pressed', 'false');
-  const interrupt = el('button', 'voice-control', 'Перебить');
   const finish = el('button', 'voice-control voice-finish', 'Закончить');
-  [start, mute, interrupt, finish].forEach(button => { button.type = 'button'; });
-  controls.append(mute, interrupt, finish);
+  [start, mute, finish].forEach(button => { button.type = 'button'; });
+  controls.append(mute, finish);
   const privacy = el('p', 'voice-privacy', 'Аудиозапись не сохраняется. Память работает по твоим настройкам. Это поддержка ИИ, не медицинская помощь.');
   footer.append(start, controls, privacy);
-  let session, frame, lastFrame = 0, level = 0, preview = null;
-  const stopPreview = () => { preview?.stop(); preview = null; };
+  let session, frame, lastFrame = 0, level = 0, preview = null, playing = null;
+  const samples = new Map();
+  const stopPreview = () => {
+    preview?.stop(); preview = null;
+    if (playing) { playing.textContent = '▶'; playing.setAttribute('aria-pressed', 'false'); playing = null; }
+  };
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const sync = () => {
     const active = session && !session.closed;
     start.hidden = !!active;
     mute.disabled = !session?.ready;
-    interrupt.disabled = !session?.awaiting;
     mute.textContent = session?.muted ? 'Микрофон выключен' : 'Микрофон включён';
     mute.setAttribute('aria-pressed', String(!!session?.muted));
     orb.dataset.state = !active ? 'idle' : session.sources.size ? 'playing' : session.muted ? 'muted' : session.awaiting ? 'thinking' : session.ready ? 'listening' : 'connecting';
@@ -2846,7 +2868,7 @@ function openVoiceScreen(options = {}) {
     settings.textContent = '← Назад';
     settings.setAttribute('aria-label', 'Вернуться к разговору');
     settings.setAttribute('aria-expanded', 'true');
-    voice.focus();
+    (form.querySelector('input[name="voice"]:checked') || form.querySelector('input[name="voice"]'))?.focus();
   };
   const closeSettings = message => {
     stopPreview();
@@ -2866,25 +2888,36 @@ function openVoiceScreen(options = {}) {
     status.textContent = session.muted ? 'Микрофон выключен. Ответ продолжит звучать.' : 'Слушаю тебя…';
     sync();
   });
-  interrupt.addEventListener('click', () => { session.interrupt(); status.textContent = 'Слушаю тебя…'; sync(); });
   finish.addEventListener('click', stop);
   settings.addEventListener('click', () => { if (panel.hidden) openSettings(); else closeSettings(); });
-  voice.addEventListener('change', stopPreview);
-  listen.addEventListener('click', async () => {
-    stopPreview(); listen.disabled = true; saved.textContent = 'Включаю пример голоса…';
+  plays.forEach(play => play.addEventListener('click', async () => {
+    const wasPlaying = playing === play;
+    stopPreview();
+    if (wasPlaying) return;
+    playing = play; play.textContent = '■'; play.setAttribute('aria-pressed', 'true');
+    saved.textContent = '';
+    const id = play.dataset.voice;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
     try {
-      const response = await fetch(freshApiUrl('/api/voice/preview'), {
-        method: 'POST', headers: apiHeaders(tg.initData, true), signal: controller.signal,
-        body: JSON.stringify({voice: voice.value}),
+      if (!samples.has(id)) {
+        const response = await fetch(freshApiUrl('/api/voice/preview'), {
+          method: 'POST', headers: apiHeaders(tg.initData, true), signal: controller.signal,
+          body: JSON.stringify({voice: id}),
+        });
+        if (!response.ok) throw new Error('Preview unavailable');
+        samples.set(id, await response.json());
+      }
+      if (playing !== play) return;  // another voice was tapped while this one loaded
+      const handle = await window.JungVoiceSession.playPreview(samples.get(id), () => {
+        if (playing === play) stopPreview();
       });
-      if (!response.ok) throw new Error('Preview unavailable');
-      preview = await window.JungVoiceSession.playPreview(await response.json());
-      saved.textContent = '';
-    } catch { saved.textContent = 'Не удалось включить пример. Попробуй ещё раз.'; }
-    finally { clearTimeout(timer); listen.disabled = false; }
-  });
+      if (playing === play) preview = handle; else handle.stop();
+    } catch {
+      if (playing === play) stopPreview();
+      saved.textContent = 'Не удалось включить пример. Попробуй ещё раз.';
+    } finally { clearTimeout(timer); }
+  }));
   form.addEventListener('submit', async event => {
     event.preventDefault(); save.disabled = true; saved.textContent = 'Сохраняю…';
     const controller = new AbortController();
@@ -2892,7 +2925,7 @@ function openVoiceScreen(options = {}) {
     try {
       const response = await fetch(freshApiUrl('/api/voice/settings'), {
         method: 'POST', headers: apiHeaders(tg.initData, true), signal: controller.signal,
-        body: JSON.stringify({voice:voice.value, style:style.value}),
+        body: JSON.stringify({voice:selectedVoice(), style:style.value}),
       });
       if (!response.ok) throw new Error('Settings unavailable');
       prefs = (await response.json()).preferences; options.preferences = prefs;

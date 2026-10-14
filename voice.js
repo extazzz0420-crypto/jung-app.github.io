@@ -58,7 +58,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-ru'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-halt'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();

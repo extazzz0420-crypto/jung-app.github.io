@@ -341,3 +341,8 @@ console.log('Voice minutes are shown and updated: passed');
 assert.doesNotMatch(voiceScreen, /кнопками телефона/, 'owner 2026-10-14: no volume-button hint, the volume is at max');
 assert.match(voiceScreen, /'Громкий звук'/, 'a loud mode switch exists');
 assert.match(voiceScreen, /loud: loud\.checked/, 'the switch reaches the voice session');
+// Owner 2026-10-14: a stop button next to the spoken «стоп», visible only while the guide talks.
+assert.match(voiceScreen, /'Остановить'/, 'a stop button exists');
+assert.match(voiceScreen, /halt\.hidden = !\(active && \(session\.sources\.size \|\| session\.awaiting\)\)/, 'shown only while answering');
+assert.match(voiceScreen, /session\.interrupt\(\)/, 'the button stops the reply');
+console.log('Voice stop button: passed');

@@ -2768,7 +2768,7 @@ function openVoiceScreen(options = {}) {
   const status = el('p', 'voice-status', 'Можно говорить свободно');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, скажи «стоп» или «подожди».');
+  const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, нажми «Остановить» или скажи «стоп».');
   // Voice is metered in spoken minutes; the person always sees what is left.
   const meter = el('p', 'voice-hint voice-minutes');
   const showMinutes = data => {
@@ -2843,8 +2843,11 @@ function openVoiceScreen(options = {}) {
   const mute = el('button', 'voice-control', 'Микрофон включён');
   mute.setAttribute('aria-pressed', 'false');
   const finish = el('button', 'voice-control voice-finish', 'Закончить');
-  [start, mute, finish].forEach(button => { button.type = 'button'; });
-  controls.append(mute, finish);
+  // Owner 2026-10-14: a spoken «стоп» takes 1-2 s to recognize and sometimes is not heard
+  // over the reply; the button stops it at once. Shown only while the guide talks.
+  const halt = el('button', 'voice-control voice-halt', 'Остановить');
+  [start, mute, halt, finish].forEach(button => { button.type = 'button'; });
+  controls.append(halt, mute, finish);
   const privacy = el('p', 'voice-privacy', 'Аудиозапись не сохраняется. Память работает по твоим настройкам. Это поддержка ИИ, не медицинская помощь.');
   footer.append(start, controls, privacy);
   let session, frame, lastFrame = 0, level = 0, preview = null, playing = null;
@@ -2858,6 +2861,7 @@ function openVoiceScreen(options = {}) {
     const active = session && !session.closed;
     start.hidden = !!active;
     mute.disabled = !session?.ready;
+    halt.hidden = !(active && (session.sources.size || session.awaiting));
     mute.textContent = session?.muted ? 'Микрофон выключен' : 'Микрофон включён';
     mute.setAttribute('aria-pressed', String(!!session?.muted));
     orb.dataset.state = !active ? 'idle' : session.sources.size ? 'playing' : session.muted ? 'muted' : session.awaiting ? 'thinking' : session.ready ? 'listening' : 'connecting';
@@ -2919,6 +2923,11 @@ function openVoiceScreen(options = {}) {
     session.setMuted(!session.muted);
     status.textContent = session.muted ? 'Микрофон выключен. Ответ продолжит звучать.' : 'Слушаю тебя…';
     sync();
+  });
+  halt.addEventListener('click', () => {
+    // Stops playback here at once; the server cancels the reply and keeps what was heard.
+    session.interrupt();
+    session.status('Остановился. Слушаю тебя…');
   });
   finish.addEventListener('click', stop);
   settings.addEventListener('click', () => { if (panel.hidden) openSettings(); else closeSettings(); });

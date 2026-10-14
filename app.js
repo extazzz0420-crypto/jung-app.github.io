@@ -2768,7 +2768,7 @@ function openVoiceScreen(options = {}) {
   const status = el('p', 'voice-status', 'Можно говорить свободно');
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, нажми «Остановить» или скажи «стоп».');
+  const hint = el('p', 'voice-hint', 'Чтобы остановить ответ, нажми «Остановить».');
   // Voice is metered in spoken minutes; the person always sees what is left.
   const meter = el('p', 'voice-hint voice-minutes');
   const showMinutes = data => {
@@ -2828,7 +2828,7 @@ function openVoiceScreen(options = {}) {
   loud.type = 'checkbox'; loud.name = 'loud';
   try { loud.checked = localStorage.getItem('jungVoiceLoud') === '1'; } catch { loud.checked = false; }
   loudField.append(loud, el('span', '', 'Громкий звук'));
-  const loudNote = el('p', 'voice-hint', 'Телефон играет голос тише, пока включён микрофон. Громкий звук это отключает, но «стоп» тогда нужно говорить громче проводника. Применится к следующему разговору.');
+  const loudNote = el('p', 'voice-hint', 'Телефон играет голос тише, пока включён микрофон. Громкий звук это отключает; в тихой комнате или в наушниках. Применится к следующему разговору.');
   form.append(loudField, loudNote);
   const note = el('p', 'voice-hint', 'Стиль общий с чатом. Настройки применяются к следующей реплике.');
   const save = el('button', 'memory-chat', 'Сохранить настройки');
@@ -2845,7 +2845,8 @@ function openVoiceScreen(options = {}) {
   const finish = el('button', 'voice-control voice-finish', 'Закончить');
   // Owner 2026-10-14: a spoken «стоп» takes 1-2 s to recognize and sometimes is not heard
   // over the reply; the button stops it at once. Shown only while the guide talks.
-  const halt = el('button', 'voice-control voice-halt', 'Остановить');
+  const halt = el('button', 'voice-control', 'Остановить');
+  halt.hidden = true;  // owner 2026-10-14: not highlighted and not shown before a reply
   [start, mute, halt, finish].forEach(button => { button.type = 'button'; });
   controls.append(halt, mute, finish);
   const privacy = el('p', 'voice-privacy', 'Аудиозапись не сохраняется. Память работает по твоим настройкам. Это поддержка ИИ, не медицинская помощь.');

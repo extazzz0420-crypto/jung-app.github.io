@@ -3767,7 +3767,6 @@ body {
 .voice-control { flex: 1; min-height: 54px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--surface); font-size: 13px !important; }
 .voice-control[aria-pressed="true"] { border-color: var(--action); background: var(--surface-alt); }
 .voice-control:disabled { opacity: .5; cursor: default; }
-.voice-halt { border-color: var(--action); color: var(--action); font-weight: 600; }
 .voice-finish { flex: .8; }
 .voice-privacy { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 20px auto 0; text-align: center; max-width: 400px; }
 .voice-settings { flex: 1; width: 100%; max-width: 440px; margin: 28px auto; }

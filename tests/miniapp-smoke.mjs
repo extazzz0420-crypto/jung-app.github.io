@@ -321,8 +321,9 @@ assert.match(voiceScreen, /type = 'radio'/, 'voices are a visible list, not a dr
 assert.match(voiceScreen, /voice-play/, 'each voice row has a play button');
 assert.match(voiceScreen, /`Послушать голос \$\{name\}`/, 'play buttons name their voice');
 assert.doesNotMatch(voiceScreen, /'Перебить'/, 'a spoken «стоп» replaces the interrupt button');
-assert.match(voiceScreen, /«стоп»/, 'the screen tells how to stop the guide');
-console.log('Voice settings back, return-after-save, per-voice preview, spoken stop: passed');
+assert.match(voiceScreen, /нажми «Остановить»/, 'the screen tells how to stop the guide');
+assert.doesNotMatch(voiceScreen, /скажи «стоп»/, 'spoken stop was dropped');
+console.log('Voice settings back, return-after-save, per-voice preview, stop hint: passed');
 
 // Voice minutes (owner decision 2026-10-14): what is left is always visible and honest.
 assert.match(voiceScreen, /showMinutes\(options\.minutes\)/, 'the screen shows minutes on open');
@@ -344,5 +345,7 @@ assert.match(voiceScreen, /loud: loud\.checked/, 'the switch reaches the voice s
 // Owner 2026-10-14: a stop button next to the spoken «стоп», visible only while the guide talks.
 assert.match(voiceScreen, /'Остановить'/, 'a stop button exists');
 assert.match(voiceScreen, /halt\.hidden = !\(active && \(session\.sources\.size \|\| session\.awaiting\)\)/, 'shown only while answering');
+assert.match(voiceScreen, /halt\.hidden = true;/, 'hidden before any reply');
+assert.match(voiceScreen, /el\('button', 'voice-control', 'Остановить'\)/, 'a plain button, not highlighted');
 assert.match(voiceScreen, /session\.interrupt\(\)/, 'the button stops the reply');
 console.log('Voice stop button: passed');

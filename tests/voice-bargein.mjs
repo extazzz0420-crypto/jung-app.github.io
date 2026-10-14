@@ -39,94 +39,33 @@ function session() {
 }
 const sent = (s, type) => s.events.filter(event => event.type === type).length;
 
-// A 120 ms cough while the guide speaks is not even checked.
+// Owner 2026-10-14: a spoken «стоп» never worked reliably over the reply; the button
+// «Остановить» stops it. While the guide answers, the microphone changes nothing.
 let s = session();
-for (let i = 0; i < 6; i++) s.frame(.1);
-for (let i = 0; i < 5; i++) s.frame(0);
-assert.equal(sent(s, 'check'), 0, 'short noise is not a stop candidate');
+for (let i = 0; i < 40; i++) s.frame(.3);
+time += 750; s.frame(0);
+assert.equal(sent(s, 'check'), 0, 'no stop checks any more');
+assert.equal(sent(s, 'end'), 0, 'talking over the reply is not a turn');
+assert.equal(sent(s, 'interrupt'), 0, 'and does not cut it');
 assert.equal(s.voice.sources.size, 1, 'playback continues');
+assert.equal(s.voice.master.gain.value, 1, 'and is not made quieter');
+assert.equal(s.binary.length, 0, 'nothing said over the reply is sent');
 
-// A short «угу» backchannel (two bursts) is not checked either.
-s = session();
-for (const level of [.1, .1, .1, .1, 0, 0, .1, .1, .1, .1, 0, 0, 0, 0, 0, 0, 0, 0]) s.frame(level);
-assert.equal(sent(s, 'check'), 0, 'backchannel is not a stop candidate');
-
-// Sustained speech becomes a check: the reply keeps playing, only quieter, and the
-// sample including its beginning goes to the server, closed at the pause.
-s = session();
-for (let i = 0; i < 30; i++) s.frame(i % 6 === 5 ? 0 : .1);
-for (let i = 0; i < 25; i++) s.frame(0);
-assert.equal(sent(s, 'check'), 1, 'speech during the reply is checked once');
-assert.equal(sent(s, 'check_end'), 1, 'the sample is closed at the pause');
-assert.equal(sent(s, 'interrupt'), 0, 'the client never cuts the reply on its own');
-assert.equal(sent(s, 'end'), 0, 'a check is not a new turn');
-assert.equal(s.voice.sources.size, 1, 'playback goes on while the server listens');
-assert.ok(s.voice.master.gain.value < .5, 'playback is ducked while checking');
-assert.ok(s.binary.length >= 20, 'the start of the speech reaches the server');
-
-// The server heard no command: full volume again, the reply continues.
-s.voice.message({ type: 'check_ignored' });
-assert.equal(s.voice.master.gain.value, 1);
-assert.equal(s.voice.sources.size, 1);
-
-// A second candidate after that is checked again; the server heard «стоп».
-for (let i = 0; i < 30; i++) s.frame(.1);
-for (let i = 0; i < 25; i++) s.frame(0);
-assert.equal(sent(s, 'check'), 2);
-s.voice.message({ type: 'stopped', turn: 1 });
-assert.equal(s.voice.sources.size, 0, 'playback stopped');
-assert.equal(s.voice.awaiting, false);
-assert.equal(s.voice.master.gain.value, 1, 'volume restored for the next reply');
-assert.equal(sent(s, 'interrupt'), 0, 'the server already cancelled the reply');
-// After the stop the person simply talks: a normal turn starts.
+// The button: playback stops here at once and the server is told.
+s.voice.interrupt();
+assert.equal(s.voice.sources.size, 0);
+assert.equal(sent(s, 'interrupt'), 1);
 for (let i = 0; i < 3; i++) s.frame(.1);
 time += 750; s.frame(0);
-assert.equal(sent(s, 'end'), 1, 'speech after the stop is a new turn');
+assert.equal(sent(s, 'end'), 1, 'after the stop the person simply talks');
 
-// No answer from the server: the volume does not stay low forever.
+// A server `stopped` (older protocol) still stops local playback.
 s = session();
-for (let i = 0; i < 30; i++) s.frame(.1);
-for (let i = 0; i < 25; i++) s.frame(0);
-s.timers.at(-1)();
-assert.equal(s.voice.master.gain.value, 1);
-assert.equal(s.voice.checkPending, false);
+s.voice.message({ type: 'stopped', turn: 1 });
+assert.equal(s.voice.sources.size, 0);
 
-// Speaker echo quieter than the guide's own output is not a candidate.
-outputRms = .2;
-s = session();
-for (let i = 0; i < 40; i++) s.frame(.06);
-assert.equal(sent(s, 'check'), 0, 'echo below the output level is not speech');
-for (let i = 0; i < 40; i++) s.frame(.25);
-assert.equal(sent(s, 'check'), 1, 'a voice louder than the echo is checked');
-outputRms = 0;
-
-// Phone case (owner test 2026-10-14 after 02944de): the reply plays at -16 dBFS, the
-// phone's echo cancellation leaves a faint residue and also dims the person's voice.
-// «Стоп» at .05 never reached the server because the bar was half the output level.
-outputRms = .16;
-s = session();
-for (let i = 0; i < 40; i++) s.frame(.008);
-assert.equal(sent(s, 'check'), 0, 'cancelled echo residue is not speech');
-for (let i = 0; i < 20; i++) s.frame(i % 5 === 4 ? .01 : .05);
-for (let i = 0; i < 25; i++) s.frame(.008);
-assert.equal(sent(s, 'check'), 1, 'a dimmed «стоп» over a loud reply is checked');
-s.voice.message({ type: 'done', turn: 1 });
-const levels = s.events.find(event => event.type === 'levels');
-assert.ok(levels && levels.checks === 1 && levels.mic_peak >= .05 && levels.echo < .2,
-  'the turn reports only numbers: loudest voice, echo ratio, checks');
-assert.deepEqual(Object.keys(levels).sort(), ['checks', 'echo', 'mic_peak', 'out_peak', 'turn', 'type']);
-outputRms = 0;
-
-// While the guide is still thinking, a short noise is not checked.
-s = session();
-s.voice.interrupt(false);
-s.voice.awaiting = true;
-for (let i = 0; i < 4; i++) s.frame(.1);
-for (let i = 0; i < 40; i++) s.frame(0);
-assert.equal(sent(s, 'check'), 0, 'short noise while thinking keeps the answer');
-
-// Owner 2026-10-14: answering right after the guide finished was taken for a stop check
-// and lost. Once every phrase was sent and played, speech is the next turn.
+// Owner 2026-10-14: answering right after the guide finished was lost. Once every phrase
+// was sent and played, speech is the next turn.
 s = session();
 s.voice.message({ type: 'phrase_end', turn: 1, phrase: 0 });
 s.voice.message({ type: 'generated', turn: 1 });
@@ -134,8 +73,7 @@ s.sources.forEach(source => source.onended?.());
 time += 200;
 for (let i = 0; i < 6; i++) s.frame(.1);
 time += 750; s.frame(0);
-assert.equal(sent(s, 'check'), 0, 'an answer after the reply is not a stop check');
-assert.equal(sent(s, 'end'), 1, 'it is sent as the next turn');
+assert.equal(sent(s, 'end'), 1, 'an answer after the reply is the next turn');
 
 // The guide's last word echoing in the room right after playback does not start a turn.
 s = session();
@@ -145,16 +83,17 @@ for (let i = 0; i < 4; i++) s.frame(.1);
 time += 750; s.frame(0);
 assert.equal(sent(s, 'end'), 0, 'echo tail is ignored');
 
-// While phrases are still coming, speech stays a stop candidate.
+// Between phrases the guide is still answering: speech there is ignored as well.
 s = session();
 s.sources.forEach(source => source.onended?.());
 time += 200;
-for (let i = 0; i < 30; i++) s.frame(.1);
-assert.equal(sent(s, 'check'), 1, 'between phrases the guide is still answering');
-// The server took those words for the next turn: the client follows its numbering.
+for (let i = 0; i < 10; i++) s.frame(.1);
+time += 750; s.frame(0);
+assert.equal(sent(s, 'end'), 0);
+
+// The server took words for the next turn: the client follows its numbering.
 s.voice.message({ type: 'heard_as_turn' });
 assert.equal(s.voice.turn, 2);
 assert.equal(s.voice.awaiting, true);
-assert.equal(s.voice.master.gain.value, 1, 'volume restored');
 
-console.log('Voice stop by spoken command, noise, backchannel and echo: passed');
+console.log('Voice reply: button stops it, talking over it is ignored, answers after it count: passed');

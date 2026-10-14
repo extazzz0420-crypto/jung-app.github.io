@@ -58,7 +58,7 @@
         const stream = await bounded(request, 15000);
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
         this.stream = stream;
-        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-halt'), 10000);
+        await bounded(this.context.audioWorklet.addModule('./voice-worklet.js?v=20261015-voice-button'), 10000);
         if (epoch !== this.epoch) return;
         if (this.context.createAnalyser) {
           this.analyser = this.context.createAnalyser();
@@ -125,49 +125,22 @@
       if (!this.ready || this.closed || this.muted) return;
       const now = performance.now();
       this.preRoll ||= [];
-      // While the guide answers, sustained speech above its own echo is only a candidate:
-      // the server listens for «стоп», «стой», «подожди» and stops the reply only then.
-      // Any sound used to cut the reply (owner phone test 2026-10-14).
-      // After the last phrase was sent and played, the guide is done: speech is the next
-      // turn, not a stop candidate (owner 2026-10-14: answers right after a reply were lost).
+      // While the guide answers, the microphone is ignored: the «Остановить» button stops
+      // a reply. A spoken «стоп» was tried and dropped (owner phone tests 2026-10-14: the
+      // phone's echo cancellation buried the word under the reply; recognition missed it).
+      // After the last phrase was sent and played, speech is the next turn at once
+      // (answers right after a reply were lost before).
       const answering = this.sources.size > 0 || (this.awaiting && !this.allSent);
-      if (!answering && !this.speaking && now < (this.quietUntil || 0)) {
-        this.preRoll.push(pcm);
-        if (this.preRoll.length > 30) this.preRoll.shift();
+      if (answering || (!this.speaking && now < (this.quietUntil || 0))) {
+        this.loudFrames = 0;
+        if (answering) this.preRoll = [];
+        else { this.preRoll.push(pcm); if (this.preRoll.length > 30) this.preRoll.shift(); }
         return;
       }
-      const threshold = answering ? this.echoThreshold(rms) : .025;
-      if (rms > threshold) {
+      if (rms > .025) {
         this.lastVoice = now;
         this.loudFrames = (this.loudFrames || 0) + 1;
-      } else this.loudFrames = answering ? Math.max(0, (this.loudFrames || 0) - 1) : 0;
-      if (this.checking) {
-        this.ws.send(pcm);
-        // A command is short: close the sample at a pause or after 2.5 s.
-        if (now - this.lastVoice > 400 || now - this.checkStarted > 2500) {
-          this.checking = false;
-          this.checkPending = true;
-          this.loudFrames = 0;
-          this.send({ type: 'check_end' });
-          this.checkTimer = setTimeout(() => this.endCheck(true), 8000);
-        }
-        return;
-      }
-      if (answering && !this.speaking) {
-        if (!this.checkPending && this.loudFrames >= 10) {
-          this.levels.checks++;
-          this.checking = true;
-          this.checkStarted = now;
-          this.duck(true);
-          this.send({ type: 'check' });
-          this.preRoll.forEach(frame => this.ws.send(frame));
-          this.preRoll = [];
-          return;
-        }
-        this.preRoll.push(pcm);
-        if (this.preRoll.length > 30) this.preRoll.shift();
-        return;
-      }
+      } else this.loudFrames = 0;
       if (!this.speaking && this.loudFrames >= 3) {
         this.speaking = true;
         this.startedSpeaking = now;
@@ -193,22 +166,6 @@
         // 600 ms keeps the start of speech that had to last 300 ms before it counted.
         if (this.preRoll.length > 30) this.preRoll.shift();
       }
-    }
-    // Echo cancellation removes most of the guide's voice from the microphone and dims the
-    // person too. The bar follows what really leaks into the microphone (the echo ratio,
-    // learned fast downward while the person is quiet), not the loudness of the reply.
-    // Owner phone test 2026-10-14: half the output level hid every spoken «стоп».
-    echoThreshold(rms) {
-      this.outEnv = Math.max(this.outputLevel(), (this.outEnv || 0) * .85);
-      const ratio = this.echoRatio ?? .5;
-      if (this.outEnv > .01) {
-        const now = rms / this.outEnv;
-        this.echoRatio = now < ratio ? ratio * .8 + now * .2 : ratio + (now - ratio) * .01;
-      }
-      this.levels ||= { mic: 0, out: 0, checks: 0 };
-      this.levels.mic = Math.max(this.levels.mic, rms);
-      this.levels.out = Math.max(this.levels.out, this.outEnv);
-      return Math.max(.02, this.outEnv * (this.echoRatio ?? .5) * 2);
     }
     // Quieter playback while a possible «стоп» is checked, so the person feels heard.
     duck(on) {
@@ -289,11 +246,6 @@
       }
       if (event.type === 'done') {
         if (event.turn !== this.turn) return;
-        // Numbers only: lets the server log show why a spoken «стоп» was or was not heard.
-        const levels = this.levels || { mic: 0, out: 0, checks: 0 };
-        this.send({ type: 'levels', turn: event.turn, mic_peak: levels.mic, out_peak: levels.out,
-          echo: this.echoRatio ?? -1, checks: levels.checks });
-        this.levels = { mic: 0, out: 0, checks: 0 };
         this.awaiting = false;
         if (!this.speaking && !this.errorState) this.status('Слушаю тебя…');
         return;
@@ -328,7 +280,7 @@
         const start = Math.max(this.context.currentTime + .03, this.nextTime || 0);
         this.nextTime = start + buffer.duration;
         source.start(start);
-        if (!this.checking && !this.checkPending) this.status('Проводник говорит. Скажи «стоп», чтобы остановить.');
+        this.status('Проводник говорит.');
       }
       if (event.type === 'phrase_end' && phrase) {
         phrase.ended = true;
